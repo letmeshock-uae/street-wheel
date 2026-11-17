@@ -47,6 +47,10 @@ export interface LapParams {
   parity: number; // чётность круга-лендинга, -1 — лендинга нет
   pageNear: number;
   pageFloor: number;
+  morphRamp: number; // за сколько метров после шва улица стекает в ленту
+  ribbonC: number; // центр ленты (w)
+  ribbonHW: number; // полуширина ленты
+  cap: number; // доля частиц улицы на круге-лендинге
 }
 
 export interface PickRequest {
@@ -89,7 +93,8 @@ const BIN = 0.05;
 let street: Street = { sMin: 0, sMax: 1, length: 1 };
 const chunks = new Map<number, WChunk>();
 let nb = 1;
-let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA, lutG = lutA;
+let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA, lutG = lutA, lutM = lutA;
+let lapNow: LapParams | null = null;
 let depth = new Float32Array(0);
 let idx = new Uint32Array(0);
 let keys = new Uint16Array(0);
@@ -106,13 +111,15 @@ function ensureLut() {
     lutD = new Float32Array(nb);
     lutP = new Float32Array(nb);
     lutG = new Float32Array(nb);
+    lutM = new Float32Array(nb);
   }
 }
 
-const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04 };
+const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04, morphRamp: 40, ribbonC: -8, ribbonHW: 18, cap: 0.3 };
 
 function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams = NO_LAP) {
   const L = street.length;
+  lapNow = lap;
   for (let b = 0; b < nb; b++) {
     const s = street.sMin + (b + 0.5) * BIN;
     const d = wrap(s - sCam, L);
@@ -128,7 +135,9 @@ function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams =
     lutP[b] = densitySeamParticle(s, sCam, street, r);
     const lapIdx = Math.floor((lap.u + d) / L);
     const landing = lap.parity >= 0 && ((lapIdx % 2) + 2) % 2 === lap.parity;
-    lutD[b] = landing ? Math.min(dens, r.farDensity) : dens;
+    lutD[b] = landing ? Math.min(dens, lap.cap) : dens;
+    const lapX = lap.u + d - lapIdx * L;
+    lutM[b] = landing ? smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX)) : 0;
     const ad = Math.abs(d);
     lutG[b] = landing ? Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 1.25))) : 0;
   }
@@ -204,9 +213,21 @@ function sort(req: SortRequest) {
         }
       }
       if (rank[i] > (dens + margin) * 65535) continue;
-      const vx = lutA[b] - h * lutS[b] - ex;
-      const vy = lutB[b] + h * lutC[b] - ey;
-      const vz = w - ez;
+      let hh = h, ww = w;
+      const mo = c.page ? 0 : lutM[b];
+      if (mo > 0) {
+        // тот же морф «улица → лента», что и в шейдере, — сортируем по новым позициям
+        const L2 = lapNow!;
+        const fr = (x: number) => x - Math.floor(x);
+        const wR = L2.ribbonC + L2.ribbonHW * Math.tanh((1.2 * (w - L2.ribbonC)) / 45) + (fr(h * 7.13) - 0.5) * 0.6;
+        const hR = 0.004 + fr(w * 3.7) * 0.008;
+        const lift = Math.sin(mo * Math.PI) * 2 * fr(s * 13.17 + w * 3.1);
+        hh = h + (hR - h) * mo + lift;
+        ww = w + (wR - w) * mo;
+      }
+      const vx = lutA[b] - hh * lutS[b] - ex;
+      const vy = lutB[b] + hh * lutC[b] - ey;
+      const vz = ww - ez;
       const dz = fx * vx + fy * vy + fz * vz;
       if (dz < 0.12) continue;
       const pad = padA + padB * dz;

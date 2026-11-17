@@ -143,7 +143,7 @@ export class Streamer {
           // на круге-лендинге улица — только редкая пыль: детальные тиры там не нужны
           const u = lap.u + wrap(sc - sCams[0], L);
           const idx = Math.floor((u + wrap(x - sc, L)) / L);
-          if ((((idx % 2) + 2) % 2) === lap.parity) d = Math.min(d, reveal.farDensity);
+          if ((((idx % 2) + 2) % 2) === lap.parity) d = Math.min(d, lap.cap);
         }
         if (d > mx) mx = d;
       }

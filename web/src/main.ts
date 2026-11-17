@@ -142,7 +142,8 @@ async function main() {
     // полотно строится, пока человек идёт первый круг
     setTimeout(async () => {
       try {
-        const chunk = await buildLanding(pageSpec, storyDef!, import.meta.env.BASE_URL + 'landing/');
+        const { chunk, texture } = await buildLanding(pageSpec, storyDef!, import.meta.env.BASE_URL + 'landing/');
+        renderer.setPageTexture(texture);
         streamer.addPage(chunk, pageSpec.sFrom, pageSpec.sTo);
       } catch (e) {
         console.warn('landing', e);
@@ -207,6 +208,10 @@ async function main() {
     parity: landingParity,
     pageNear: 55 * Math.max(0.7, profile.radius * adaptive.detail),
     pageFloor: 0.08,
+    morphRamp: 40,
+    ribbonC: LOOK.lane,
+    ribbonHW: pageSpec.width / 2,
+    cap: 0.3,
   });
 
   const currentReveal = (): RevealParams => {
@@ -288,6 +293,8 @@ async function main() {
     float: [0, 0, 0, 0],
     motion: [1, 0.25, 0, 0],
     lap: [0, -1, 30, 0.05],
+    lap2: [40, LOOK.lane, 18, 0.3],
+    pageRect: [pageSpec.sFrom, pageSpec.sTo, pageSpec.wLeft, pageSpec.width],
   };
 
   const frame = (now: number) => {
@@ -312,7 +319,7 @@ async function main() {
     }
     // на круге-лендинге взгляд чуть выше: в кадре поднимающееся полотно
     landingBlend += ((landingParity >= 0 && lapOf(controls.s) === landingParity ? 1 : 0) - landingBlend) * Math.min(1, dt * 1.2);
-    controls.basePitch += 0.2 * landingBlend;
+    controls.basePitch += 0.3 * landingBlend;
     controls.wheelGain = S.wheelGain;
     controls.smoothing = S.smoothing;
     cam.eye[1] = S.eye;
@@ -358,6 +365,7 @@ async function main() {
     uni.motion = [1.45 / Math.max(0.05, S.arrive), S.emBand, 0, 0];
     const lp = lapParams();
     uni.lap = [lp.u, lp.parity, lp.pageNear, lp.pageFloor];
+    uni.lap2 = [lp.morphRamp, lp.ribbonC, lp.ribbonHW, lp.cap];
     uni.lat = [reveal.latCenter, reveal.latInner, reveal.latOuter, reveal.latDensity];
     renderer.render(uni, LOOK.bg);
 

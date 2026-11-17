@@ -25,6 +25,9 @@ uniform vec4 u_float;   // scatterBase, scatterPerM, driftNear, driftFar — «�
 uniform highp sampler2D u_birth; // время заливки каждой страницы пула (строки текстуры)
 uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, -, -
 uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2L), чётность круга-лендинга (-1 — нет), pageNear, pageFloor
+uniform vec4 u_lap2;    // morphRamp (м), центр ленты (w), полуширина ленты, доля частиц улицы на круге-лендинге
+uniform vec4 u_pageRect;// sFrom, sTo, wLeft, width — где на ободе лежит страница
+uniform sampler2D u_page; // страница лендинга (для окраски частиц, слетевшихся в ленту)
 
 layout(location = 0) in uint a_index;
 
@@ -88,15 +91,27 @@ void main() {
     dens = min(max(u_dens.z, min(1.0, raw)), lim);
     densEm = min(raw, lim); // без ограничения сверху: рядом всё гарантированно «собрано»
     pf = max(max(smoothstep(u_part.x, u_part.y, ad), sm), lt);
-    if (landing) {
-      // на круге-лендинге город остаётся только редкой парящей пылью вокруг полотна
-      dens = min(dens, u_dens.z);
-      densEm = -2.0;
-      pf = 1.0;
-    }
+    if (landing) dens = min(dens, u_lap2.w);
   }
   float fade = 1.0 - smoothstep(dens * 0.82, dens, rank);
   if (fade <= 0.002) return;
+
+  // ---- круг-лендинг: сама улица «стекает» в белую ленту на ободе колеса.
+  // morph зависит от места точки внутри круга (от шва): за первые u_lap2.x метров улица
+  // сплющивается к полу и сжимается по ширине, к концу круга — разворачивается обратно.
+  float lapX = (u_lap.x + d) - lapIdx * L;
+  float morph = (landing && !isPage) ? smoothstep(0.0, u_lap2.x, lapX) * (1.0 - smoothstep(L - u_lap2.x, L, lapX)) : 0.0;
+  vec3 pageCol = vec3(0.965, 0.957, 0.937);
+  if (morph > 0.0) {
+    float c = u_lap2.y, hw = u_lap2.z;
+    float wR = c + hw * tanh(1.2 * (p.z - c) / 45.0) + (fract(p.y * 7.13) - 0.5) * 0.6;
+    float hR = 0.004 + fract(p.z * 3.7) * 0.008; // ниже точек текста — не перекрывают буквы
+    float lift = sin(morph * 3.14159) * 2.0 * fract(p.x * 13.17 + p.z * 3.1); // летят дугой
+    vec2 uv = vec2((wR - u_pageRect.z) / u_pageRect.w, (u_pageRect.y - p.x) / (u_pageRect.y - u_pageRect.x));
+    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) pageCol = texture(u_page, uv).rgb;
+    p.y = mix(p.y, hR, morph) + lift;
+    p.z = mix(p.z, wR, morph);
+  }
 
   uint hsh = pcg(idx);
   uint hsh2 = pcg(hsh);
@@ -114,7 +129,8 @@ void main() {
   float band = isPage ? 0.12 : u_motion.y;
   float em = (densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
   fade *= min(1.0, arrive * 4.0);
-  float pfE = max(pf, 1.0 - em);
+  em = max(em, morph); // слетевшиеся в ленту не разлетаются
+  float pfE = max(max(pf, 1.0 - em), morph);
 
   // ---- изгиб улицы в колесо
   float th = kappa * d;
@@ -145,6 +161,8 @@ void main() {
   vec2 ndc = clip.xy / clip.w;
 
   vec4 col = vec4(float(A.z & 255u), float((A.z >> 8u) & 255u), float((A.z >> 16u) & 255u), float(A.z >> 24u)) / 255.0;
+  col.rgb = mix(col.rgb, pageCol, morph);
+  col.a = mix(col.a, max(col.a, 0.9), morph);
   // вдали (pf) частицы подсвечены, чтобы читались как «звёзды»; летящие на место — лишь чуть ярче
   float alpha = mix(col.a, max(col.a, u_part.w), pf);
   alpha = mix(alpha, min(1.0, alpha * 2.0), 1.0 - em);

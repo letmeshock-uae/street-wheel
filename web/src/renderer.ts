@@ -20,6 +20,8 @@ export interface FrameUniforms {
   float: [number, number, number, number];
   motion: [number, number, number, number];
   lap: [number, number, number, number];
+  lap2: [number, number, number, number];
+  pageRect: [number, number, number, number];
 }
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
@@ -40,6 +42,7 @@ export class SplatRenderer {
   private texB: WebGLTexture;
   private segTex: WebGLTexture;
   private birthTex: WebGLTexture;
+  private pageTex: WebGLTexture;
   /** текущее время (сек) — помечаем им заливаемые страницы, шейдер делает «прилёт» частиц */
   clock = 0;
   private vao: WebGLVertexArrayObject;
@@ -74,7 +77,7 @@ export class SplatRenderer {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link error');
     this.prog = prog;
-    for (const n of ['u_texA', 'u_texB', 'u_seg', 'u_view', 'u_proj', 'u_focal', 'u_viewport', 'u_ring', 'u_ring2', 'u_dens', 'u_part', 'u_seam', 'u_seamP', 'u_lat', 'u_misc', 'u_float', 'u_birth', 'u_motion', 'u_lap'])
+    for (const n of ['u_texA', 'u_texB', 'u_seg', 'u_view', 'u_proj', 'u_focal', 'u_viewport', 'u_ring', 'u_ring2', 'u_dens', 'u_part', 'u_seam', 'u_seamP', 'u_lat', 'u_misc', 'u_float', 'u_birth', 'u_motion', 'u_lap', 'u_lap2', 'u_pageRect', 'u_page'])
       this.loc[n] = gl.getUniformLocation(prog, n);
 
     const mkTex = (internal: number, w: number, h: number) => {
@@ -90,6 +93,13 @@ export class SplatRenderer {
     this.texA = mkTex(gl.RGBA32UI, PAGE, this.rows);
     this.texB = mkTex(gl.R32UI, PAGE, this.rows);
     this.segTex = gl.createTexture()!;
+    this.pageTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.pageTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 244, 239, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.birthTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.birthTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, this.rows, 1, 0, gl.RED, gl.FLOAT, new Float32Array(this.rows).fill(-1e4));
@@ -136,6 +146,14 @@ export class SplatRenderer {
     const t = new Float32Array([this.clock]);
     gl.bindTexture(gl.TEXTURE_2D, this.birthTex);
     for (const row of pages) gl.texSubImage2D(gl.TEXTURE_2D, 0, row, 0, 1, 1, gl.RED, gl.FLOAT, t);
+  }
+
+  /** Страница лендинга как текстура: ею окрашиваются частицы улицы, слетевшиеся в ленту. */
+  setPageTexture(src: HTMLCanvasElement) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.pageTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
   }
 
   /** extra — дополнительные «сегменты» (например, лендинг): flag 1 — частицы шва, 2 — полотно */
@@ -187,11 +205,14 @@ export class SplatRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.segTex);
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.birthTex);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.pageTex);
     const L = this.loc;
     gl.uniform1i(L.u_texA, 0);
     gl.uniform1i(L.u_texB, 1);
     gl.uniform1i(L.u_seg, 2);
     gl.uniform1i(L.u_birth, 3);
+    gl.uniform1i(L.u_page, 4);
     gl.uniformMatrix4fv(L.u_view, false, u.view);
     gl.uniformMatrix4fv(L.u_proj, false, u.proj);
     gl.uniform2fv(L.u_focal, u.focal);
@@ -207,6 +228,8 @@ export class SplatRenderer {
     gl.uniform4fv(L.u_float, u.float);
     gl.uniform4fv(L.u_motion, u.motion);
     gl.uniform4fv(L.u_lap, u.lap);
+    gl.uniform4fv(L.u_lap2, u.lap2);
+    gl.uniform4fv(L.u_pageRect, u.pageRect);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
     gl.enable(gl.BLEND);

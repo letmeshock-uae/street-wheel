@@ -48,7 +48,7 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
   });
 }
 
-export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: string): Promise<DecodedChunk> {
+export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: string): Promise<{ chunk: DecodedChunk; texture: HTMLCanvasElement }> {
   // шрифт должен быть загружен до рисования, иначе canvas возьмёт запасной
   try {
     await Promise.all([document.fonts.load('700 100px Inter'), document.fonts.load('400 100px Inter'), document.fonts.load('600 100px Inter')]);
@@ -98,8 +98,8 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     return lines;
   };
   const para = (t: string, xM: number, yM: number, sizeM: number, maxM: number, lh = 1.4, color = INK) => {
-    const lines = wrap(t, sizeM, maxM);
-    lines.forEach((l, i) => text(l, xM, yM + i * sizeM * lh, sizeM, 400, color));
+    const lines = wrap(t, sizeM, maxM, 500);
+    lines.forEach((l, i) => text(l, xM, yM + i * sizeM * lh, sizeM, 500, color));
     return lines.length * sizeM * lh;
   };
   const halftone = (xM: number, yM: number, wM: number, hM: number, stride: number, color: boolean) =>
@@ -179,7 +179,7 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
       halftone(left - 0.6, t + 2, colX - left, 8.4, 3, false);
       text(c.title, colX, t + 4.4, 3, 700);
       halftone(colX - 0.3, t + 1.6, colW + 0.6, 3.6, 2, false);
-      const used = para(c.short ?? c.body, colX, t + 6.9, 1.45, colW, 1.3, '#2a2a2a');
+      const used = para(c.short ?? c.body, colX, t + 7.1, 1.7, colW, 1.25, '#222');
       const gy = t + 6.9 + used + 0.3;
       draw(colX, gy, colW, t + 25 - gy);
     });
@@ -330,10 +330,15 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
   for (const r of regions)
     for (let y = Math.max(0, r.y); y < Math.min(H, r.y + r.h); y++) mask.fill(1, y * W + Math.max(0, r.x), y * W + Math.min(W, r.x + r.w));
 
-  const xs: number[] = [], ys: number[] = [], hs: number[] = [], sg: number[] = [], cols: number[] = [], als: number[] = [];
-  const push = (x: number, y: number, h: number, sigmaM: number, r: number, g: number, b: number, a: number) => {
-    xs.push(x);
-    ys.push(y);
+  // бумага — плоские сплаты на полу; текст и картинки — круглые точки: под острым углом
+  // плоский диск вытягивается в черту и строки превращаются в полосы, а сфера остаётся точкой
+  const xs: number[] = [], ys: number[] = [], hs: number[] = [], sg: number[] = [], cols: number[] = [], als: number[] = [], flats: boolean[] = [];
+  const push = (x: number, y: number, h: number, sigmaM: number, r: number, g: number, b: number, a: number, flat = false) => {
+    flats.push(flat);
+    // случайный сдвиг в пределах ячейки: регулярная сетка точек в перспективе даёт муар-полосы
+    const j = flat ? 0 : (sigmaM / sp.mpp) * 0.55;
+    xs.push(x + (Math.random() - 0.5) * j);
+    ys.push(y + (Math.random() - 0.5) * j);
     hs.push(h);
     sg.push(sigmaM);
     cols.push((r & 255) | ((g & 255) << 8) | ((b & 255) << 16));
@@ -343,7 +348,7 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
 
   // paper
   const ps = Math.max(4, Math.round(0.48 * P));
-  for (let y = ps / 2; y < H; y += ps) for (let x = ps / 2; x < W; x += ps) push(x, y, 0, 0.3, PAPER[0], PAPER[1], PAPER[2], 0.97);
+  for (let y = ps / 2; y < H; y += ps) for (let x = ps / 2; x < W; x += ps) push(x, y, 0, 0.3, PAPER[0], PAPER[1], PAPER[2], 0.97, true);
 
   // halftone regions: one dot per cell; size from coverage (mono) or a full colour mosaic (pictures)
   for (const r of regions) {
@@ -368,7 +373,7 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
         const cov = Math.max(0, Math.min(1, ink / n));
         if (r.color) {
           if (cov < 0.02) continue;
-          push(x + k / 2, y + k / 2, 0.03, 0.42 * k * sp.mpp, R, G, B, 1);
+          push(x + k / 2, y + k / 2, 0.03, 0.62 * k * sp.mpp, R, G, B, 1);
         } else {
           if (cov < 0.08) continue;
           // pure ink colour, dot area ∝ coverage
@@ -392,9 +397,9 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
       const sat = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
       const ink = Math.max(1 - l / 0.96, sat / 255);
       if (ink < 0.16) continue;
-      const a = Math.min(1, ink * 1.25);
+      const a = Math.min(1, ink * 1.5);
       const inv = (c: number, pp: number) => Math.max(0, Math.min(255, Math.round(pp - (pp - c) / Math.max(a, 0.05))));
-      push(x + 0.5, y + 0.5, 0.03, 0.6 * sp.mpp, inv(data[i], PAPER[0]), inv(data[i + 1], PAPER[1]), inv(data[i + 2], PAPER[2]), a);
+      push(x + 0.5, y + 0.5, 0.04, 0.72 * sp.mpp, inv(data[i], PAPER[0]), inv(data[i + 1], PAPER[1]), inv(data[i + 2], PAPER[2]), a);
     }
 
   // ---------- pack into the same layout as streamed chunks
@@ -421,12 +426,18 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     texA[j + 2] = (cols[k] | (als[k] << 24)) >>> 0;
     texA[j + 3] = 255 | (128 << 8) | (128 << 16) | (128 << 24); // identity rotation
     const sgm = ls(sg[k]);
-    texB[k] = sgm | (flat << 8) | (sgm << 16) | segBits;
+    texB[k] = sgm | ((flats[k] ? flat : sgm) << 8) | (sgm << 16) | segBits;
     pos[k * 3] = bmin[0] + (qx / 65535) * ext[0];
     pos[k * 3 + 1] = bmin[1] + (qy / 65535) * ext[1];
     pos[k * 3 + 2] = bmin[2] + (qz / 65535) * ext[2];
     rank[k] = r16;
     alpha[k] = als[k];
   }
-  return { seg: sp.segId, tier: -2, count: n, texA, texB, pos, rank, alpha };
+  // уменьшенная копия страницы — ею красятся частицы улицы, слетевшиеся в ленту
+  const tex = document.createElement('canvas');
+  const k = Math.max(1, Math.ceil(Math.max(W, H) / 2048));
+  tex.width = Math.max(1, Math.round(W / k));
+  tex.height = Math.max(1, Math.round(H / k));
+  tex.getContext('2d')!.drawImage(cv, 0, 0, tex.width, tex.height);
+  return { chunk: { seg: sp.segId, tier: -2, count: n, texA, texB, pos, rank, alpha }, texture: tex };
 }
