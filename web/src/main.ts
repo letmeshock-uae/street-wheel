@@ -136,6 +136,8 @@ async function main() {
   // какой круг лендинговый: стартовый круг — всегда улица
   const lapOf = (sAbs: number) => Math.floor(((((sAbs - street.sMax) % (2 * L)) + 2 * L) % (2 * L)) / L);
   const landingParity = landingOn ? 1 - lapOf(controls.s) : -1;
+  // ?landing — сразу на круг-лендинг, чуть перед началом полотна
+  if (landingOn && params.has('landing')) controls.s = controls.sTarget = pageSpec.sFrom - 30 + L;
   if (landingOn) {
     // полотно строится, пока человек идёт первый круг
     setTimeout(async () => {
