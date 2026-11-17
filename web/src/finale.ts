@@ -1,17 +1,14 @@
 // Финал рассказа — обычная текстовая плашка поверх сцены. Её прокручивает тот же скролл, что ведёт
-// колесо: на круге-финале город рассыпан в абстрактные частицы, плашка въезжает снизу, проезжает
-// и уходит вверх; дальше на асфальте — «The loop goes on.», город собирается обратно,
+// колесо: на круге-финале город рассыпан в абстрактные частицы. Сначала идут надписи из частиц
+// (заголовок посреди улицы и две строки на стенах, particletext.ts), потом снизу въезжает плашка,
+// проезжает и уходит вверх; дальше на асфальте — «The loop goes on.», город собирается обратно,
 // и рассказ начинается заново.
 
 // ---------------------------------------------------------------------------------------------
 // COPY — текст финала (по документу City World Model). Правится свободно, вёрстка подстроится.
 // ---------------------------------------------------------------------------------------------
+// заголовок «Every kilometre counts.» и строки про поток кадров — из частиц, в particletext.ts
 const COPY = {
-  kicker: 'City world model · Inside the loop',
-  headline: 'Every kilometre counts.',
-  lead: 'Scattered frames become a continuously updated, verifiable model of the city: the most data per kilometre, at the least cost per pass.',
-  fleet: 'Hundreds of cars, taxis and couriers drive the same streets with the same cameras. Soon, thousands.',
-  flood: 'What comes back is a flood: duplicate, contradictory, ambiguous. Seeing a pole is easy. Deciding what is true is the work.',
   pipelineTitle: 'Observation first.',
   pipeline: [
     ['Raw data', 'Our own capture, partners and city sources.'],
@@ -37,7 +34,7 @@ const COPY = {
   bitemporal: 'Seen in August. Known in October. Both dates kept.',
   principlesTitle: 'Principles',
   principles: ['Many frames, one look.', 'Not seeing it is not seeing it gone.', 'A resident report waits for a machine look.', 'Protect the event.'],
-  // финальная строка «The loop goes on.» — не здесь, а на асфальте после плашки (floortext.ts)
+  // финальная строка «The loop goes on.» — не здесь, а на асфальте после плашки (particletext.ts)
 };
 
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -55,15 +52,6 @@ export class Finale {
     el.className = 'finale';
     el.setAttribute('aria-label', 'City world model: inside the loop');
     el.innerHTML = `
-      <header class="fi-head">
-        <p class="fi-kicker">${esc(c.kicker)}</p>
-        <h2 class="fi-title">${esc(c.headline)}</h2>
-        <p class="fi-lead">${esc(c.lead)}</p>
-      </header>
-      <section class="fi-sec">
-        <p>${esc(c.fleet)}</p>
-        <p>${esc(c.flood)}</p>
-      </section>
       <section class="fi-sec">
         <h3>${esc(c.pipelineTitle)}</h3>
         <ol class="fi-steps">

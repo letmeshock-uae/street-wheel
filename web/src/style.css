@@ -591,9 +591,8 @@ body.clean #ui, body.clean #pois { display: none; }
 }
 .finale p { margin: 0 0 14px; font-size: 16px; line-height: 1.6; color: var(--fg-dim); }
 .fi-kicker { font-size: 11px !important; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent) !important; margin: 0 0 12px !important; }
-.fi-title { margin: 0 0 20px; font-size: 56px; font-weight: 650; line-height: 1.02; letter-spacing: -0.03em; }
-.finale .fi-lead { font-size: 19px; line-height: 1.5; color: var(--fg); }
 .fi-sec { margin-top: 52px; padding-top: 28px; border-top: 1px solid var(--line); }
+.fi-sec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .finale h3 { margin: 0 0 18px; font-size: 30px; font-weight: 620; line-height: 1.1; letter-spacing: -0.02em; }
 .finale ol { list-style: none; margin: 0 0 22px; padding: 0; }
 .fi-steps li, .fi-principles li { display: grid; grid-template-columns: 44px 1fr; padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
@@ -615,8 +614,6 @@ body.clean #ui, body.clean #pois { display: none; }
 .finale .fi-sec:last-child ol { margin-bottom: 0; }
 @media (max-width: 600px) {
   .finale { padding: 30px 22px 36px; border-radius: 16px; }
-  .fi-title { font-size: 38px; }
-  .finale .fi-lead { font-size: 17px; }
   .finale h3 { font-size: 24px; }
   .finale .fi-id { font-size: 54px; }
   .fi-principles li { font-size: 18px; }

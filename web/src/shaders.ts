@@ -2,8 +2,8 @@
 
 /** финал: разлёт (м + м на метр дали) и парение (м) рассыпанного города — сортировщик расширяет на них отсечение */
 export const FINALE_FLOAT = { scatter: 2.5, perM: 0.05, drift: 0.9 };
-/** надпись на асфальте: дальше FAR м — редкая пыль, ближе NEAR м — собрана целиком */
-export const FLOOR_TEXT_REVEAL = { near: 16, far: 75 };
+/** надписи финала из частиц: дальше FAR м — редкая пыль, ближе NEAR м — дописаны целиком */
+export const TEXT_REVEAL = { near: 18, far: 75 };
 
 export const SPLAT_VS = /* glsl */ `#version 300 es
 precision highp float;
@@ -34,8 +34,8 @@ uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2
 const float FIN_SCATTER = ${FINALE_FLOAT.scatter.toFixed(3)};
 const float FIN_SCATTER_PER_M = ${FINALE_FLOAT.perM.toFixed(3)};
 const float FIN_DRIFT = ${FINALE_FLOAT.drift.toFixed(3)};
-const float TXT_NEAR = ${FLOOR_TEXT_REVEAL.near.toFixed(1)};
-const float TXT_FAR = ${FLOOR_TEXT_REVEAL.far.toFixed(1)};
+const float TXT_NEAR = ${TEXT_REVEAL.near.toFixed(1)};
+const float TXT_FAR = ${TEXT_REVEAL.far.toFixed(1)};
 
 layout(location = 0) in uint a_index;
 
@@ -62,7 +62,7 @@ void main() {
   vec3 p = sb.xyz + vec3(float(A.x & 0xffffu), float(A.x >> 16u), float(A.y & 0xffffu)) * (se.xyz / 65535.0);
   float rank = float(A.y >> 16u) / 65535.0;
   bool partOnly = sb.w > 0.5 && sb.w < 1.5; // частицы шва
-  bool isText = sb.w > 1.5;                  // финальная надпись на асфальте (floortext.ts)
+  bool isText = sb.w > 1.5;                  // надписи финала из частиц (particletext.ts)
 
   float sCam = u_ring.x, kappa = u_ring.y, L = u_ring.z, sMin = u_ring.w, sMax = u_ring2.x;
   float d = wrapd(p.x - sCam, L);
@@ -85,9 +85,10 @@ void main() {
   float textEm = 0.0;
   if (isText) {
     if (!finale) return;
-    // надпись: вдали — редкая пыль, по мере приближения собирается целиком (у каждой точки свой момент)
+    // надпись «пишется» по мере приближения в порядке чтения (порядок лежит в ранге точки);
+    // когда человек проходит сквозь панель, она снова рассыпается, а не слепит облаком
     float k = clamp((TXT_FAR - ad) / (TXT_FAR - TXT_NEAR), 0.0, 1.0);
-    textEm = smoothstep(rank * 0.35, rank * 0.35 + 0.55, k);
+    textEm = smoothstep(rank - 0.03, rank + 0.1, k * 1.1) * smoothstep(4.0, 12.0, ad);
     dens = gate;
     densEm = 1.0;
     pf = 0.0;
@@ -148,7 +149,7 @@ void main() {
   float farT = smoothstep(u_part.y * 0.4, u_part.y * 2.2, ad); // ~25 м → ~140 м: средний план читается, дальний парит
   // на финале форма улицы расплывается в облако, и оно заметно плывёт
   float scatter = (1.0 - em) * (u_float.x + ad * u_float.y) + dis * (FIN_SCATTER + ad * FIN_SCATTER_PER_M);
-  float drift = u_float.z * pfE + u_float.w * farT + dis * FIN_DRIFT;
+  float drift = (u_float.z * pfE + u_float.w * farT) * (isText ? 0.15 : 1.0) + dis * FIN_DRIFT; // буквы не дрожат
   vec3 wob = vec3(
     sin(time * (0.23 + 0.17 * rnd) + rnd2 * 6.2831 + W.x * 0.07),
     sin(time * (0.19 + 0.15 * rnd2) + rnd3 * 6.2831 + W.z * 0.09),
@@ -170,6 +171,8 @@ void main() {
   float tw = 1.0 - u_seam.w * pfE * (0.5 + 0.5 * sin(time * (0.8 + 1.7 * rnd) + rnd2 * 6.2831));
   // рассыпанные частицы, оказавшиеся у самого глаза, не раздуваются в мутные пятна
   alpha *= mix(1.0, smoothstep(1.0, 5.0, z), dis);
+  // ещё не дописанное — тусклая пыль; панель, сквозь которую проходишь, гаснет
+  if (isText) alpha *= mix(0.45, 1.0, em) * smoothstep(3.0, 10.0, ad);
   alpha *= fade * axle * tw * u_ring2.w;
   if (alpha < 1.0 / 255.0) return;
 
