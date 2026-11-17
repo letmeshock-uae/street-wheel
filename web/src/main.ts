@@ -60,7 +60,7 @@ async function main() {
   }
   const pageSpec: PageSpec = {
     sFrom: street.sMin + 25,
-    sTo: street.sMax - 22,
+    sTo: street.sMax - 42, // заканчиваем до того, как город начнёт возвращаться
     width: 36,
     wLeft: LOOK.lane - 18,
     // разрешение текста: точка на 2.5 см — мелкие подписи остаются чёткими

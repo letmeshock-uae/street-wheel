@@ -196,7 +196,7 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
     add(p, { f, w: C + side * 9.5, h: 4.4, yaw: side < 0 ? 90 : -90 });
   };
   wall(COPY.fleet, 0.1, -1);
-  wall(COPY.flood, 0.16, 1);
+  wall(COPY.flood, 0.165, 1);
 
   // ---- 3. a word on the asphalt (stretched along the street, like road markings)
   {
@@ -206,7 +206,8 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
     add(p, { f: 0.235, w: C, h: 0.06, tilt: -90, stretch: 2.6 });
   }
 
-  // ---- 4. the conveyor: angled cards on the right, rejects on the left wall
+  // ---- 4. the conveyor: what gets filtered out (left wall), then angled cards alternating left / right
+  wall(COPY.rejected, 0.275, -1, 1.25, 24);
   COPY.pipeline.forEach(([title, body], i) => {
     const bh = heightOf(body, 0.8, 9.6, 1.3);
     const p = new Panel(10.5, 3.6 + bh, mpp);
@@ -215,9 +216,9 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
     p.zone(0.3, 2.0, 9.9, 0.2);
     p.line(0.3, 2.1, 10.2, 2.1, 0.05, MUTED);
     p.para(body, 0.3, 3.2, 0.8, 9.6);
-    add(p, { f: 0.29 + i * 0.032, w: C + 6.2 + (i % 2) * 1.2, h: 2.4 + (i % 3) * 1.4 + p.hM / 2, yaw: 32 });
+    const side = i % 2 ? -1 : 1;
+    add(p, { f: 0.32 + i * 0.034, w: C + side * 7.2, h: 2.2 + (i % 3) * 1.2 + p.hM / 2, yaw: side * 34 });
   });
-  wall(COPY.rejected, 0.37, -1, 1.25, 24);
 
   // ---- 5. the life of one street light: title in the middle, episodes alternating left / right
   {
@@ -226,7 +227,7 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
     p.text(COPY.life.id, 11, 7.8, 5.6, 700, INK, 0, 'center');
     p.halftone(0, 2.4, 22, 6.2, 2);
     p.text('Look → Object → State → Event', 11, 9.6, 0.95, 600, MUTED, 0, 'center');
-    add(p, { f: 0.54, w: C, h: 1.0 + p.hM / 2 });
+    add(p, { f: 0.575, w: C, h: 1.0 + p.hM / 2 });
   }
   COPY.episodes.forEach(([when, verb, cause, note], i) => {
     const nh = heightOf(note, 0.8, 9.4, 1.3);
@@ -236,9 +237,17 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
     if (cause) p.text(`cause: ${cause}`, 0.3 + vw + 0.5, 2.9, 0.75, 700, cause === 'world' ? OK : MUTED);
     p.para(note, 0.3, 4.2, 0.8, 9.4);
     const side = i % 2 ? 1 : -1;
-    add(p, { f: 0.585 + i * 0.038, w: C + side * 6.3, h: 2.6 + p.hM / 2, yaw: side * 30 });
+    add(p, { f: 0.61 + i * 0.04, w: C + side * 7.4, h: 2.4 + (i % 2) * 0.8 + p.hM / 2, yaw: side * 34 });
   });
-  wall(COPY.eventCost, 0.82, 1, 1.3, 26);
+  wall(COPY.eventCost, 0.875, 1, 1.3, 26);
+  // напротив — что такое дельта
+  wall(COPY.delta, 0.885, -1, 1.2, 28);
+  // время дважды — на асфальте, перед принципами
+  {
+    const p = new Panel(30, 2.6, mpp);
+    p.text(COPY.bitemporal, 15, 2.0, 1.7, 700, INK, 0, 'center');
+    add(p, { f: 0.925, w: C, h: 0.06, tilt: -90, stretch: 2.6 });
+  }
 
   // ---- 6. principles: one panel in the middle
   {
@@ -250,24 +259,16 @@ export async function buildLanding(sp: PageSpec, _story: StoryDef): Promise<{ ch
       p.text(String(i + 1).padStart(2, '0'), 0.3, y, 0.75, 700, MUTED);
       y += p.para(t, 2.2, y, 1.3, 19.5, 1.2, INK, 600) + 0.9;
     });
-    add(p, { f: 0.88, w: C, h: 1.2 + p.hM / 2 });
+    add(p, { f: 0.96, w: C, h: 2.6 + p.hM / 2 });
   }
 
-  // ---- 7. what a delta is (left wall) and time, twice (asphalt)
-  wall(COPY.delta, 0.9, -1, 1.2, 28);
+  // ---- 7. closing — on the asphalt, leading back into the street
   {
-    const p = new Panel(30, 2.6, mpp);
-    p.text(COPY.bitemporal, 15, 2.0, 1.7, 700, INK, 0, 'center');
-    add(p, { f: 0.95, w: C, h: 0.06, tilt: -90, stretch: 2.6 });
-  }
-
-  // ---- 8. closing
-  {
-    const p = new Panel(20, 6.2, mpp);
-    p.text(COPY.closing[0], 10, 2.8, 2.4, 700, INK, 0, 'center');
-    p.halftone(0, 0.4, 20, 3.0, 2);
-    p.text(COPY.closing[1], 10, 5.4, 1.2, 600, ACCENT, 0, 'center');
-    add(p, { f: 1.0, w: C, h: 1.2 + p.hM / 2 });
+    const p = new Panel(30, 5.4, mpp);
+    p.text(COPY.closing[0], 15, 2.7, 2.6, 700, INK, 0, 'center');
+    p.halftone(0, 0, 30, 3.2, 2);
+    p.text(COPY.closing[1], 15, 4.9, 1.4, 700, ACCENT, 0, 'center');
+    add(p, { f: 1.0, w: C, h: 0.06, tilt: -90, stretch: 2.6 });
   }
 
   // ---------------------------------------------------------------------------------------------

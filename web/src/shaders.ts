@@ -123,7 +123,9 @@ void main() {
     float order = float(A.w & 0xffffu) / 65535.0;
     float P = 1.0 - smoothstep(u_lap.z * 0.3, u_lap.z * 1.25, ad);
     float rev = smoothstep(order - 0.03, order + 0.08, P * 1.1);
-    pageEm = rev * smoothstep(2.5, 9.0, ad);
+    pageEm = rev * smoothstep(4.0, 12.0, ad);
+    // ещё не «написанное» — редкая пыль: видна лишь малая часть частиц, остальные появляются при сборке
+    if (rnd3 > mix(0.1, 1.0, smoothstep(0.0, 0.6, pageEm))) return;
     float S = (1.0 - pageEm) * (1.5 + ad * 0.035);
     p += vec3((rnd - 0.5) * 0.6, (rnd2 - 0.5) * 2.0 + 0.5, (rnd3 - 0.5) * 2.0) * S;
   }
@@ -189,7 +191,8 @@ void main() {
   float alpha = mix(col.a, max(col.a, u_part.w), pf);
   alpha = mix(alpha, min(1.0, alpha * 2.0), 1.0 - em);
   float tw = 1.0 - u_seam.w * pfE * (0.5 + 0.5 * sin(time * (0.8 + 1.7 * rnd) + rnd2 * 6.2831));
-  if (isPage) alpha *= mix(0.35, 1.0, em); // ещё не «написанное» — тусклая пыль
+  // ещё не «написанное» — тусклая пыль; панель, сквозь которую проходишь, гаснет, а не слепит облаком
+  if (isPage) alpha *= mix(0.45, 1.0, em) * smoothstep(3.0, 10.0, ad);
   alpha *= fade * axle * tw * u_ring2.w;
   if (alpha < 1.0 / 255.0) return;
 
