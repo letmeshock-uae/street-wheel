@@ -5,7 +5,7 @@ import type { DecodedChunk, Manifest } from './data';
 import type { DecodeJob, DecodeReply } from './decode.worker';
 import { PAGE, type SplatRenderer } from './renderer';
 import { densityAlong, wrap, type RevealParams, type Street } from './ring';
-import type { SortIn } from './sort.worker';
+import type { LapParams, SortIn } from './sort.worker';
 
 interface ChunkState {
   key: string;
@@ -32,7 +32,7 @@ export class Streamer {
   private nextDecoder = 0;
   private jobId = 1;
   private jobs = new Map<number, { onChunk: (c: DecodedChunk) => void; resolve: () => void; reject: (e: Error) => void; onProgress?: (n: number) => void }>();
-  private uploads: { st: ChunkState | null; chunk: DecodedChunk; partOnly: boolean; s0: number; s1: number; rankMin: number }[] = [];
+  private uploads: { st: ChunkState | null; chunk: DecodedChunk; partOnly: boolean; page?: boolean; s0: number; s1: number; rankMin: number }[] = [];
   private pendingFree: { pages: Int32Array; afterReq: number }[] = [];
   private nextChunkId = 1;
   private inflight = 0;
@@ -111,6 +111,13 @@ export class Streamer {
     void this.loadSeam();
   }
 
+  /** Готовый кусок, собранный в браузере (лендинг-полотно). */
+  addPage(chunk: DecodedChunk, s0: number, s1: number) {
+    const st: ChunkState = { key: `${chunk.seg}:page`, seg: chunk.seg, tier: -2, state: 'loading', id: 0, pages: null, count: chunk.count, bytes: 0 };
+    this.chunks.set(st.key, st);
+    this.uploads.push({ st, chunk, partOnly: false, page: true, s0, s1, rankMin: 0 });
+  }
+
   /** Частицы шва: облако в форме профиля улицы, которое прячет стык концов. */
   private async loadSeam() {
     const sm = this.m.seam;
@@ -124,26 +131,33 @@ export class Streamer {
   }
 
   /** Сколько деталей нужно сегменту: максимум плотности по его длине (для текущей и будущей позиции). */
-  private segDensity(seg: number, sCams: number[], reveal: RevealParams): number {
+  private segDensity(seg: number, sCams: number[], reveal: RevealParams, lap?: LapParams): number {
     const s = this.m.segments[seg];
+    const L = this.street.length;
     let mx = 0;
     for (const sc of sCams) {
       for (let k = 0; k <= 4; k++) {
         const x = s.s0 + ((s.s1 - s.s0) * k) / 4 - (k === 4 ? 1e-3 : 0);
-        const d = densityAlong(x, sc, this.street, reveal).dens;
+        let d = densityAlong(x, sc, this.street, reveal).dens;
+        if (lap && lap.parity >= 0) {
+          // на круге-лендинге улица — только редкая пыль: детальные тиры там не нужны
+          const u = lap.u + wrap(sc - sCams[0], L);
+          const idx = Math.floor((u + wrap(x - sc, L)) / L);
+          if ((((idx % 2) + 2) % 2) === lap.parity) d = Math.min(d, reveal.farDensity);
+        }
         if (d > mx) mx = d;
       }
     }
     return mx;
   }
 
-  update(sCam: number, velocity: number, reveal: RevealParams) {
+  update(sCam: number, velocity: number, reveal: RevealParams, lap?: LapParams) {
     const L = this.street.length;
     const ahead = sCam + Math.max(-30, Math.min(30, velocity * 1.6));
     const sCams = [sCam, ahead];
     const tr = this.m.tierRanks;
     const want: { seg: number; tier: number; score: number }[] = [];
-    const segDens = this.m.segments.map((s) => this.segDensity(s.id, sCams, reveal));
+    const segDens = this.m.segments.map((s) => this.segDensity(s.id, sCams, reveal, lap));
 
     for (const s of this.m.segments) {
       const dens = segDens[s.id];
@@ -269,6 +283,7 @@ export class Streamer {
         id,
         seg: u.chunk.seg,
         partOnly: u.partOnly,
+        page: u.page,
         pos: u.chunk.pos,
         rank: u.chunk.rank,
         alpha: u.chunk.alpha,
@@ -292,6 +307,11 @@ export class Streamer {
       }
       return true;
     });
+  }
+
+  /** что-то качается или ждёт заливки в GPU */
+  get busy() {
+    return this.inflight > 0 || this.uploads.length > 0;
   }
 
   stats(): StreamStats {

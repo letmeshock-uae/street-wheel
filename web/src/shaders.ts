@@ -24,6 +24,7 @@ uniform vec4 u_misc;    // scaleLogMin, scaleLogStep, dotWorld, clock (сек, �
 uniform vec4 u_float;   // scatterBase, scatterPerM, driftNear, driftFar — «лимбо»
 uniform highp sampler2D u_birth; // время заливки каждой страницы пула (строки текстуры)
 uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, -, -
+uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2L), чётность круга-лендинга (-1 — нет), pageNear, pageFloor
 
 layout(location = 0) in uint a_index;
 
@@ -49,7 +50,8 @@ void main() {
   vec4 se = texelFetch(u_seg, ivec2(seg * 2 + 1, 0), 0);
   vec3 p = sb.xyz + vec3(float(A.x & 0xffffu), float(A.x >> 16u), float(A.y & 0xffffu)) * (se.xyz / 65535.0);
   float rank = float(A.y >> 16u) / 65535.0;
-  bool partOnly = sb.w > 0.5;
+  bool partOnly = sb.w > 0.5 && sb.w < 1.5; // частицы шва
+  bool isPage = sb.w > 1.5;                  // лендинг-полотно
 
   float sCam = u_ring.x, kappa = u_ring.y, L = u_ring.z, sMin = u_ring.w, sMax = u_ring2.x;
   float d = wrapd(p.x - sCam, L);
@@ -59,8 +61,18 @@ void main() {
   //  dens — доля видимых сплатов (по рангу); pf — насколько сплат сжат в точку (по расстоянию);
   //  em   — насколько сплат «собрался» на своём месте: 0 — парит частицей в воздухе, 1 — на месте.
   //  Каждый сплат рождается частицей у порога видимости и слетается на место по мере приближения.
+  // на каком круге эта точка: на круге-лендинге видно полотно, на обычном — улица
+  float lapIdx = floor((u_lap.x + d) / L);
+  bool landing = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5;
+
   float dens, pf, densEm;
-  if (partOnly) {
+  if (isPage) {
+    if (!landing) return;
+    float rawP = pow(u_lap.z / max(ad, 1e-3), 1.25);
+    dens = max(u_lap.w, min(1.0, rawP));
+    densEm = rawP;
+    pf = smoothstep(u_lap.z * 1.5, u_lap.z * 3.0, ad);
+  } else if (partOnly) {
     float t = smoothstep(u_part.x * 0.5, u_dens.y, ad);
     dens = mix(u_seamP.x, u_seamP.y, t);
     float e = abs(wrapd(p.x - sMax, L));
@@ -76,6 +88,12 @@ void main() {
     dens = min(max(u_dens.z, min(1.0, raw)), lim);
     densEm = min(raw, lim); // без ограничения сверху: рядом всё гарантированно «собрано»
     pf = max(max(smoothstep(u_part.x, u_part.y, ad), sm), lt);
+    if (landing) {
+      // на круге-лендинге город остаётся только редкой парящей пылью вокруг полотна
+      dens = min(dens, u_dens.z);
+      densEm = -2.0;
+      pf = 1.0;
+    }
   }
   float fade = 1.0 - smoothstep(dens * 0.82, dens, rank);
   if (fade <= 0.002) return;
@@ -92,7 +110,9 @@ void main() {
   float arrive = clamp((u_misc.w - birth) * u_motion.x - rnd * 0.45, 0.0, 1.0);
   arrive = arrive * arrive * (3.0 - 2.0 * arrive);
   // «собираются» только самые новые сплаты на данной дистанции (доля u_motion.y) — у порога видимости
-  float em = (densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - u_motion.y), densEm, rank)) * arrive;
+  // полотно должно читаться: у него узкая полоса «сборки» и слабый разлёт
+  float band = isPage ? 0.12 : u_motion.y;
+  float em = (densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
   fade *= min(1.0, arrive * 4.0);
   float pfE = max(pf, 1.0 - em);
 
@@ -109,8 +129,9 @@ void main() {
   // ---- «лимбо»: несобранные частицы смещены со своих мест и медленно парят; вдали — сильнее
   vec3 rdir = vec3(rnd, rnd2, rnd3) * 2.0 - 1.0;
   float farT = smoothstep(u_part.y * 0.4, u_part.y * 2.2, ad); // ~25 м → ~140 м: средний план читается, дальний парит
-  float scatter = (1.0 - em) * (u_float.x + ad * u_float.y);
-  float drift = u_float.z * pfE + u_float.w * farT;
+  float pageK = isPage ? 0.35 : 1.0;
+  float scatter = (1.0 - em) * (u_float.x + ad * u_float.y) * pageK;
+  float drift = (u_float.z * pfE + u_float.w * farT) * pageK;
   vec3 wob = vec3(
     sin(time * (0.23 + 0.17 * rnd) + rnd2 * 6.2831 + W.x * 0.07),
     sin(time * (0.19 + 0.15 * rnd2) + rnd3 * 6.2831 + W.z * 0.09),

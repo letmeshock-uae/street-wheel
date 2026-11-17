@@ -12,6 +12,7 @@ interface WChunk {
   id: number;
   seg: number;
   partOnly: boolean;
+  page: boolean;
   n: number;
   pos: Float32Array;
   rank: Uint16Array;
@@ -37,6 +38,15 @@ export interface SortRequest {
   pad: [number, number];
   reveal: RevealParams;
   maxSorted: number;
+  lap: LapParams;
+}
+
+/** круги: на круге-лендинге видно полотно, улица — редкая пыль */
+export interface LapParams {
+  u: number; // позиция камеры за швом, mod 2L
+  parity: number; // чётность круга-лендинга, -1 — лендинга нет
+  pageNear: number;
+  pageFloor: number;
 }
 
 export interface PickRequest {
@@ -44,6 +54,7 @@ export interface PickRequest {
   reqId: number;
   sCam: number;
   kappa: number;
+  lap: LapParams;
   origin: [number, number, number];
   dir: [number, number, number];
   reveal: RevealParams;
@@ -56,6 +67,7 @@ export type SortIn =
       id: number;
       seg: number;
       partOnly: boolean;
+      page?: boolean;
       pos: Float32Array;
       rank: Uint16Array;
       alpha: Uint8Array;
@@ -77,7 +89,7 @@ const BIN = 0.05;
 let street: Street = { sMin: 0, sMax: 1, length: 1 };
 const chunks = new Map<number, WChunk>();
 let nb = 1;
-let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA;
+let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA, lutG = lutA;
 let depth = new Float32Array(0);
 let idx = new Uint32Array(0);
 let keys = new Uint16Array(0);
@@ -93,10 +105,13 @@ function ensureLut() {
     lutC = new Float32Array(nb);
     lutD = new Float32Array(nb);
     lutP = new Float32Array(nb);
+    lutG = new Float32Array(nb);
   }
 }
 
-function buildLut(sCam: number, kappa: number, r: RevealParams) {
+const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04 };
+
+function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams = NO_LAP) {
   const L = street.length;
   for (let b = 0; b < nb; b++) {
     const s = street.sMin + (b + 0.5) * BIN;
@@ -109,8 +124,13 @@ function buildLut(sCam: number, kappa: number, r: RevealParams) {
     lutB[b] = d * cosc;
     lutS[b] = sn;
     lutC[b] = cs;
-    lutD[b] = densityAlong(s, sCam, street, r).dens;
+    const dens = densityAlong(s, sCam, street, r).dens;
     lutP[b] = densitySeamParticle(s, sCam, street, r);
+    const lapIdx = Math.floor((lap.u + d) / L);
+    const landing = lap.parity >= 0 && ((lapIdx % 2) + 2) % 2 === lap.parity;
+    lutD[b] = landing ? Math.min(dens, r.farDensity) : dens;
+    const ad = Math.abs(d);
+    lutG[b] = landing ? Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 1.25))) : 0;
   }
 }
 
@@ -134,7 +154,7 @@ function ensureScratch(n: number) {
 function sort(req: SortRequest) {
   const t0 = performance.now();
   const r = req.reveal;
-  buildLut(req.sCam, req.kappa, r);
+  buildLut(req.sCam, req.kappa, r, req.lap);
   let total = 0;
   for (const c of chunks.values()) total += c.n;
   ensureScratch(total);
@@ -153,7 +173,12 @@ function sort(req: SortRequest) {
 
   for (const c of chunks.values()) {
     let maxDens: number;
-    if (c.partOnly) {
+    if (c.page) {
+      maxDens = 0;
+      const b0 = binOf(c.s0), b1 = binOf(c.s1 - 1e-3);
+      const span = (((b1 - b0) % nb) + nb) % nb;
+      for (let k = 0, b = b0; k <= span; k++, b = (b + 1) % nb) if (lutG[b] > maxDens) maxDens = lutG[b];
+    } else if (c.partOnly) {
       maxDens = 0;
       for (let b = 0; b < nb; b += 8) if (lutP[b] > maxDens) maxDens = lutP[b];
     } else {
@@ -163,8 +188,8 @@ function sort(req: SortRequest) {
     }
     if (c.rankMin > maxDens + margin) continue;
     candidates += c.n;
-    const lut = c.partOnly ? lutP : lutD;
-    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly;
+    const lut = c.page ? lutG : c.partOnly ? lutP : lutD;
+    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly || c.page;
     for (let i = 0; i < n; i++) {
       const i3 = i * 3;
       const s = pos[i3], h = pos[i3 + 1], w = pos[i3 + 2];
@@ -228,14 +253,14 @@ function sort(req: SortRequest) {
 
 function pick(req: PickRequest) {
   const r = req.reveal;
-  buildLut(req.sCam, req.kappa, r);
+  buildLut(req.sCam, req.kappa, r, req.lap);
   const [ox, oy, oz] = req.origin;
   const [dx, dy, dz] = req.dir;
   // собираем сплаты возле луча и ищем, где накопленная непрозрачность пересекает порог —
   // так же, как глаз видит поверхность из множества полупрозрачных сплатов
   const hits: { t: number; a: number; s: number; h: number; w: number }[] = [];
   for (const c of chunks.values()) {
-    if (c.partOnly) continue;
+    if (c.partOnly || c.page) continue;
     const pos = c.pos, rank = c.rank, alpha = c.alpha, n = c.n;
     for (let i = 0; i < n; i++) {
       if (alpha[i] < 5) continue;
@@ -282,6 +307,7 @@ self.onmessage = (e: MessageEvent<SortIn>) => {
         id: m.id,
         seg: m.seg,
         partOnly: m.partOnly,
+        page: !!m.page,
         n: m.rank.length,
         pos: m.pos,
         rank: m.rank,

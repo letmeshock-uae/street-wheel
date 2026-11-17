@@ -7,6 +7,10 @@ import { bendPoint, smoothstep, wrap } from './ring';
 export interface PoiDef {
   id: string;
   title: string;
+  /** 'detection' — frame around the object, 'asset' — registry tag, otherwise a dot with a label */
+  kind?: 'detection' | 'asset' | 'info';
+  category?: string;
+  chapter?: string;
   text?: string;
   tag?: string;
   link?: string;
@@ -55,6 +59,7 @@ export class PoiLayer {
   /** на каком расстоянии вдоль улицы метка начинает проявляться (впереди / позади) */
   range = 70;
   rangeBehind = 22;
+  private hot: string | null = null;
 
   constructor(private root: HTMLElement, private m: Manifest, private cam: Camera) {
     this.card = document.createElement('aside');
@@ -72,9 +77,18 @@ export class PoiLayer {
     this.pois = defs.map((d, i) => {
       const [s, h, w] = d.street ?? (d.model ? modelToStreet(this.m, d.model) : [0, 0, 0]);
       const el = document.createElement('div');
-      el.className = 'poi';
+      el.className = `poi poi--${d.kind ?? 'info'}`;
       el.style.display = 'none';
-      el.innerHTML = `<button class="poi-dot" aria-label="${esc(d.title)}"><span></span></button><div class="poi-label"><b>${esc(d.tag ?? String(i + 1).padStart(2, '0'))}</b>${esc(d.title)}</div>`;
+      if (d.kind === 'detection')
+        el.innerHTML =
+          `<button class="det-box" aria-label="${esc(d.title)}"><i></i><i></i><i></i><i></i></button>` +
+          `<div class="poi-label"><b>Detected</b>${esc(d.category ?? d.title)}</div>`;
+      else if (d.kind === 'asset')
+        el.innerHTML =
+          `<button class="poi-dot" aria-label="${esc(d.title)}"><span></span></button>` +
+          `<div class="poi-label"><b>Asset · ${esc(d.category ?? '')}</b>${esc(d.title)}<em>registered</em></div>`;
+      else
+        el.innerHTML = `<button class="poi-dot" aria-label="${esc(d.title)}"><span></span></button><div class="poi-label"><b>${esc(d.tag ?? String(i + 1).padStart(2, '0'))}</b>${esc(d.title)}</div>`;
       const poi: Poi = { ...d, s, h, w, el, visible: false };
       el.querySelector('button')!.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -83,6 +97,16 @@ export class PoiLayer {
       this.root.appendChild(el);
       return poi;
     });
+  }
+
+  /** подсветка метки (наведение на строку в панели главы) */
+  highlight(id: string | null) {
+    this.hot = id;
+    for (const q of this.pois) q.el.classList.toggle('is-hot', q.id === id);
+  }
+
+  byId(id: string) {
+    return this.pois.find((p) => p.id === id) ?? null;
   }
 
   select(p: Poi | null) {
@@ -94,23 +118,26 @@ export class PoiLayer {
       return;
     }
     this.card.innerHTML =
-      `<button class="poi-close" aria-label="Закрыть">×</button>` +
-      `<div class="poi-card-tag">${esc(p.tag ?? '')}</div><h2>${esc(p.title)}</h2>` +
+      `<button class="poi-close" aria-label="Close">×</button>` +
+      `<div class="poi-card-tag">${esc(p.kind === 'detection' ? 'Detected' : p.kind === 'asset' ? 'Asset' : p.tag ?? '')}</div><h2>${esc(p.title)}</h2>` +
       (p.image ? `<img src="${esc(p.image)}" alt="">` : '') +
       (p.text ? `<p>${esc(p.text)}</p>` : '') +
-      (p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Подробнее →</a>` : '');
+      (p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Learn more →</a>` : '');
     this.card.querySelector('.poi-close')!.addEventListener('click', () => this.select(null));
     this.card.hidden = false;
     this.onOpen?.(p);
   }
 
-  update(sCam: number, kappa: number, cssW: number, cssH: number, globalAlpha: number) {
+  /** chapterAlpha(p) — дополнительная видимость метки (глава рассказа активна или нет) */
+  update(sCam: number, kappa: number, cssW: number, cssH: number, globalAlpha: number, chapterAlpha: (p: Poi) => number = () => 1) {
     const L = this.m.street.length;
+    const focal = cssH / 2 / this.cam.tanY;
     for (const p of this.pois) {
       const ds = wrap(p.s - sCam, L);
       const d = Math.abs(ds);
       const rng = ds >= 0 ? this.range : this.rangeBehind;
-      let a = (1 - smoothstep(rng * 0.6, rng, d)) * globalAlpha;
+      let a = (1 - smoothstep(rng * 0.6, rng, d)) * globalAlpha * chapterAlpha(p);
+      if (p.id === this.hot) a = Math.max(a, 0.9 * globalAlpha * Math.min(1, chapterAlpha(p) * 4));
       let pr: ReturnType<Camera['project']> = null;
       if (a > 0.01) {
         bendPoint(p.s, p.h, p.w, sCam, kappa, L, this.tmp);
@@ -126,8 +153,15 @@ export class PoiLayer {
         if (p === this.open && d > this.range) this.select(null);
         continue;
       }
-      const sc = Math.max(0.65, Math.min(1.15, 18 / pr.depth));
-      p.el.style.transform = `translate3d(${pr.x.toFixed(1)}px, ${pr.y.toFixed(1)}px, 0) scale(${sc.toFixed(3)})`;
+      if (p.kind === 'detection') {
+        // рамка «детекции» примерно на 2.2 м объекта
+        const box = Math.max(34, Math.min(260, (2.2 * focal) / pr.depth));
+        p.el.style.setProperty('--box', `${box.toFixed(0)}px`);
+        p.el.style.transform = `translate3d(${pr.x.toFixed(1)}px, ${pr.y.toFixed(1)}px, 0)`;
+      } else {
+        const sc = Math.max(0.65, Math.min(1.15, 18 / pr.depth));
+        p.el.style.transform = `translate3d(${pr.x.toFixed(1)}px, ${pr.y.toFixed(1)}px, 0) scale(${sc.toFixed(3)})`;
+      }
       p.el.style.opacity = a.toFixed(3);
       p.el.style.zIndex = String(10000 - Math.round(pr.depth * 10));
       if (p === this.open) {

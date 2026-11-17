@@ -19,6 +19,7 @@ export interface FrameUniforms {
   misc: [number, number, number, number];
   float: [number, number, number, number];
   motion: [number, number, number, number];
+  lap: [number, number, number, number];
 }
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
@@ -56,7 +57,7 @@ export class SplatRenderer {
       premultipliedAlpha: true,
       powerPreference: 'high-performance',
     });
-    if (!gl) throw new Error('WebGL2 недоступен');
+    if (!gl) throw new Error('WebGL2 is not available');
     this.gl = gl;
 
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
@@ -73,7 +74,7 @@ export class SplatRenderer {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link error');
     this.prog = prog;
-    for (const n of ['u_texA', 'u_texB', 'u_seg', 'u_view', 'u_proj', 'u_focal', 'u_viewport', 'u_ring', 'u_ring2', 'u_dens', 'u_part', 'u_seam', 'u_seamP', 'u_lat', 'u_misc', 'u_float', 'u_birth', 'u_motion'])
+    for (const n of ['u_texA', 'u_texB', 'u_seg', 'u_view', 'u_proj', 'u_focal', 'u_viewport', 'u_ring', 'u_ring2', 'u_dens', 'u_part', 'u_seam', 'u_seamP', 'u_lat', 'u_misc', 'u_float', 'u_birth', 'u_motion', 'u_lap'])
       this.loc[n] = gl.getUniformLocation(prog, n);
 
     const mkTex = (internal: number, w: number, h: number) => {
@@ -137,15 +138,17 @@ export class SplatRenderer {
     for (const row of pages) gl.texSubImage2D(gl.TEXTURE_2D, 0, row, 0, 1, 1, gl.RED, gl.FLOAT, t);
   }
 
-  setSegments(m: Manifest) {
+  /** extra — дополнительные «сегменты» (например, лендинг): flag 1 — частицы шва, 2 — полотно */
+  setSegments(m: Manifest, extra: { id: number; bmin: number[]; ext: number[]; flag: number }[] = []) {
     const gl = this.gl;
-    const n = m.segments.length + 1;
+    const n = Math.max(m.segments.length + 1, ...extra.map((e) => e.id + 1));
     const data = new Float32Array(n * 2 * 4);
     for (const s of m.segments) {
       data.set([s.bmin[0], s.bmin[1], s.bmin[2], 0, s.ext[0], s.ext[1], s.ext[2], 0], s.id * 8);
     }
     const sm = m.seam;
     data.set([sm.bmin[0], sm.bmin[1], sm.bmin[2], 1, sm.ext[0], sm.ext[1], sm.ext[2], 0], sm.id * 8);
+    for (const e of extra) data.set([e.bmin[0], e.bmin[1], e.bmin[2], e.flag, e.ext[0], e.ext[1], e.ext[2], 0], e.id * 8);
     gl.bindTexture(gl.TEXTURE_2D, this.segTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, n * 2, 1, 0, gl.RGBA, gl.FLOAT, data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -203,6 +206,7 @@ export class SplatRenderer {
     gl.uniform4fv(L.u_misc, u.misc);
     gl.uniform4fv(L.u_float, u.float);
     gl.uniform4fv(L.u_motion, u.motion);
+    gl.uniform4fv(L.u_lap, u.lap);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
     gl.enable(gl.BLEND);

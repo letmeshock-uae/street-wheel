@@ -1,0 +1,175 @@
+{
+  "title": "City world model",
+  "subtitle": "One street, seen as a loop. Walk through how a city is captured, checked, understood, and updated again.",
+  "cta": "Scroll to begin",
+  "startS": -118,
+  "chapters": [
+    {
+      "id": "capture",
+      "title": "Capture",
+      "start": -125,
+      "body": "We photograph the city street by street. Frames come from our own cameras and from a fleet of drivers who pass the same streets again and again.",
+      "widget": "capture",
+      "items": [
+        "Own cameras",
+        "Driver fleet"
+      ],
+      "short": "Own cameras and a driver fleet photograph every street."
+    },
+    {
+      "id": "gate",
+      "title": "Quality gate",
+      "start": -80,
+      "body": "Not every frame is useful. The server rejects the frames we don't need and passes the rest on.",
+      "widget": "gate",
+      "short": "The server keeps useful frames and rejects the rest."
+    },
+    {
+      "id": "detect",
+      "title": "Detection",
+      "start": -38,
+      "body": "In the frames that pass, we detect violations: damaged fences and street lights, illegal advertising, graffiti, holes in the road surface.",
+      "widget": "detect",
+      "short": "Fences, street lights, illegal ads, graffiti, potholes."
+    },
+    {
+      "id": "registry",
+      "title": "Asset registry",
+      "start": 30,
+      "body": "Every detection becomes a record in a database of assets, grouped by violation category.",
+      "widget": "registry",
+      "short": "Every detection becomes a record, grouped by category."
+    },
+    {
+      "id": "case",
+      "title": "Case",
+      "start": 78,
+      "body": "From the registry we build a case: literally a narrative about what is wrong in the city, and where.",
+      "widget": "case",
+      "short": "Records become a narrative of what is wrong, and where."
+    },
+    {
+      "id": "refresh",
+      "title": "Reupdated",
+      "start": 108,
+      "body": "City data is dynamic and changes every day. When a road gets repaired, it is no longer a problem. So the loop starts again.",
+      "widget": "refresh",
+      "short": "The city changes daily. Fixed problems close, the loop restarts."
+    }
+  ],
+  "markers": [
+    {
+      "id": "det-light",
+      "chapter": "detect",
+      "kind": "detection",
+      "category": "Street light",
+      "title": "Street light",
+      "text": "Category: damaged street lights.",
+      "street": [
+        -12.1,
+        7.2,
+        15.5
+      ]
+    },
+    {
+      "id": "det-ad",
+      "chapter": "detect",
+      "kind": "detection",
+      "category": "Illegal advertising",
+      "title": "Signage",
+      "text": "Category: illegal advertising.",
+      "street": [
+        -3.39,
+        3.41,
+        -13.71
+      ]
+    },
+    {
+      "id": "det-fence",
+      "chapter": "detect",
+      "kind": "detection",
+      "category": "Fence damage",
+      "title": "Barrier",
+      "text": "Category: damaged fences.",
+      "street": [
+        4.24,
+        0.6,
+        0.52
+      ]
+    },
+    {
+      "id": "det-graffiti",
+      "chapter": "detect",
+      "kind": "detection",
+      "category": "Graffiti",
+      "title": "Wall",
+      "text": "Category: graffiti.",
+      "street": [
+        9.66,
+        2.83,
+        -16.3
+      ]
+    },
+    {
+      "id": "det-road",
+      "chapter": "detect",
+      "kind": "detection",
+      "category": "Road damage",
+      "title": "Road surface",
+      "text": "Category: holes in the road surface.",
+      "street": [
+        14,
+        0.05,
+        -7.5
+      ]
+    },
+    {
+      "id": "asset-light",
+      "chapter": "registry",
+      "kind": "asset",
+      "category": "Street light",
+      "title": "Street light",
+      "street": [
+        56.9,
+        7.2,
+        -16.3
+      ]
+    },
+    {
+      "id": "asset-barrier",
+      "chapter": "registry",
+      "kind": "asset",
+      "category": "Fence damage",
+      "title": "Barrier",
+      "street": [
+        64,
+        0.6,
+        0.5
+      ]
+    },
+    {
+      "id": "asset-road",
+      "chapter": "registry",
+      "kind": "asset",
+      "category": "Road damage",
+      "title": "Road surface",
+      "street": [
+        67,
+        0.05,
+        -6
+      ]
+    },
+    {
+      "id": "asset-sign",
+      "chapter": "registry",
+      "kind": "asset",
+      "category": "Illegal advertising",
+      "title": "Storefront signage",
+      "street": [
+        73.33,
+        9.15,
+        -36.39
+      ]
+    }
+  ]
+}

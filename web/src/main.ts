@@ -3,13 +3,15 @@ import { Camera } from './camera';
 import type { Manifest } from './data';
 import { Controls } from './controls';
 import { DebugHud, WheelHud } from './hud';
-import { PoiLayer, type PoiDef } from './pois';
+import { PoiLayer } from './pois';
 import { Adaptive, detectQuality, PROFILES } from './quality';
 import { SplatRenderer, type FrameUniforms } from './renderer';
 import { DEFAULT_REVEAL, smoothstep, wrap, type RevealParams } from './ring';
 import { Streamer } from './streamer';
 import type { SortIn, SortOut, SortRequest } from './sort.worker';
 import { loadSettings, TunePanel } from './tune';
+import { Story, type StoryDef } from './story';
+import { buildLanding, pageBounds, type PageSpec } from './landing';
 
 const params = new URLSearchParams(location.search);
 // ?data=имя_папки — A/B-сравнение разных сборок данных из public/
@@ -46,10 +48,28 @@ async function main() {
   try {
     renderer = new SplatRenderer(canvas, profile.poolSplats);
   } catch (e) {
-    status.textContent = 'Ваш браузер не поддерживает WebGL2 — сцена недоступна.';
+    status.textContent = 'Your browser does not support WebGL2, so the scene cannot be shown.';
     throw e;
   }
-  renderer.setSegments(manifest);
+  // ---- рассказ (story.json) и лендинг-полотно на каждом втором круге
+  let storyDef: StoryDef | null = null;
+  try {
+    storyDef = await (await fetch(import.meta.env.BASE_URL + 'story.json')).json();
+  } catch (e) {
+    console.warn('story.json', e);
+  }
+  const pageSpec: PageSpec = {
+    sFrom: street.sMin + 42,
+    sTo: street.sMax - 45,
+    width: 36,
+    wLeft: LOOK.lane - 18,
+    mpp: q.name === 'low' ? 0.06 : q.name === 'mid' ? 0.05 : 0.04,
+    segId: manifest.segments.length + 1,
+    scaleLogMin: manifest.quant.scaleLogMin,
+    scaleLogMax: manifest.quant.scaleLogMax,
+  };
+  const landingOn = !!storyDef && !params.has('nolanding');
+  renderer.setSegments(manifest, landingOn ? [{ id: pageSpec.segId, ...pageBounds(pageSpec), flag: 2 }] : []);
 
   // ---- воркер сортировки
   const sorter = new Worker(new URL('./sort.worker.ts', import.meta.url), { type: 'module' });
@@ -78,7 +98,7 @@ async function main() {
   };
 
   // ---- стартовая загрузка (редкие частицы всего кольца)
-  status.textContent = 'Собираем улицу…';
+  status.textContent = 'Assembling the street…';
   await streamer.loadBase((f) => (bar.style.transform = `scaleX(${(0.1 + f * 0.9).toFixed(3)})`));
 
   const cam = new Camera();
@@ -86,30 +106,54 @@ async function main() {
   cam.fovY = (S.fov * Math.PI) / 180;
   const controls = new Controls(canvas);
   controls.basePitch = S.pitch;
-  controls.s = controls.sTarget = LOOK.startS;
+  controls.s = controls.sTarget = params.has('s') ? LOOK.startS : storyDef?.startS ?? LOOK.startS;
   controls.mouseLook = !params.has('edit');
   const adaptive = new Adaptive();
 
-  // ---- сноски
+  // ---- метки на объектах + рассказ
   const pois = new PoiLayer($('#pois'), manifest, cam);
   const hud = new WheelHud(ui, L, street.sMax, manifest.street.seamWidth);
-  try {
-    const defs: PoiDef[] = await (await fetch(import.meta.env.BASE_URL + 'pois.json')).json();
-    pois.set(defs);
-    hud.setPois(pois.pois);
-  } catch (e) {
-    console.warn('pois.json', e);
-  }
-  hud.onPick = (p) => {
-    controls.goTo(p.s - 9, L);
-    setTimeout(() => pois.select(p), 900);
+  const goToPoi = (id: string) => {
+    const p = pois.byId(id);
+    if (!p) return;
+    controls.goTo(p.s - 14, L);
+    setTimeout(() => pois.select(p), 1100);
   };
+  hud.onPick = (p) => goToPoi(p.id);
   pois.onOpen = (p) => document.body.classList.toggle('poi-open', !!p);
+  let story: Story | null = null;
+  if (storyDef) {
+    story = new Story(ui, storyDef, L);
+    pois.set(storyDef.markers);
+    hud.setPois(pois.pois);
+    hud.setChapters(story.chapters.map((c, i) => ({ start: c.start, len: ((story!.chapters[(i + 1) % story!.chapters.length].start - c.start) % L + L) % L || L, title: c.title })));
+    hud.onChapter = (i) => controls.goTo(story!.chapterStart(i) + 3, L);
+    story.onGo = (s) => controls.goTo(s, L);
+    story.onHover = (id) => pois.highlight(id);
+    story.onOpenMarker = goToPoi;
+    $('#hint')?.remove();
+  }
+  // какой круг лендинговый: стартовый круг — всегда улица
+  const lapOf = (sAbs: number) => Math.floor(((((sAbs - street.sMax) % (2 * L)) + 2 * L) % (2 * L)) / L);
+  const landingParity = landingOn ? 1 - lapOf(controls.s) : -1;
+  if (landingOn) {
+    // полотно строится, пока человек идёт первый круг
+    setTimeout(async () => {
+      try {
+        const chunk = await buildLanding(pageSpec, storyDef!, import.meta.env.BASE_URL + 'landing/');
+        streamer.addPage(chunk, pageSpec.sFrom, pageSpec.sTo);
+      } catch (e) {
+        console.warn('landing', e);
+      }
+    }, 2500);
+  }
 
   // любая правка в панели → пересортировка с новыми параметрами
   let tuneVersion = 0;
   if (!params.has('notune')) new TunePanel(ui, S, () => tuneVersion++);
 
+  // ?clean — только сцена, без интерфейса (для чистых кадров)
+  document.body.classList.toggle('clean', params.has('clean'));
   const debug = new DebugHud(ui);
   if (!params.has('debug')) debug.toggle();
 
@@ -128,7 +172,7 @@ async function main() {
       editMode = !editMode;
       controls.mouseLook = !editMode;
       document.body.classList.toggle('edit', editMode);
-      showToast(editMode ? 'Режим разметки: кликните по объекту, координаты скопируются' : 'Режим разметки выключен', 2200);
+      showToast(editMode ? 'Edit mode: click an object to copy its coordinates' : 'Edit mode off', 2200);
     }
     if (e.key === 'd' && e.shiftKey) debug.toggle();
   });
@@ -137,13 +181,13 @@ async function main() {
     const r = cam.ray(e.clientX, e.clientY, innerWidth, innerHeight);
     const id = reqId++;
     picks.set(id, (hit) => {
-      if (!hit) return showToast('Ничего не нашлось под курсором — попробуйте ближе к объекту');
-      const json = `{ "id": "poi-${Date.now().toString(36)}", "title": "Новая точка", "text": "", "street": [${hit.s.toFixed(2)}, ${hit.h.toFixed(2)}, ${hit.w.toFixed(2)}] }`;
+      if (!hit) return showToast('Nothing under the cursor. Try clicking closer to an object.');
+      const json = `{ "id": "poi-${Date.now().toString(36)}", "title": "New point", "text": "", "street": [${hit.s.toFixed(2)}, ${hit.h.toFixed(2)}, ${hit.w.toFixed(2)}] }`;
       navigator.clipboard?.writeText(json).catch(() => {});
       console.log(json);
-      showToast(`<b>Скопировано</b><code>${json}</code>`, 6000);
+      showToast(`<b>Copied</b><code>${json}</code>`, 6000);
     });
-    sorter.postMessage({ type: 'pick', reqId: id, sCam: sCamOf(controls.s), kappa, origin: r.origin, dir: r.dir, reveal: currentReveal() } satisfies SortIn);
+    sorter.postMessage({ type: 'pick', reqId: id, sCam: sCamOf(controls.s), kappa, lap: lapParams(), origin: r.origin, dir: r.dir, reveal: currentReveal() } satisfies SortIn);
   });
 
   // ---- интро: прямая улица сворачивается в колесо
@@ -152,9 +196,16 @@ async function main() {
   let globalAlpha = introT >= 1 ? 1 : 0;
   const INTRO_DELAY = 0.6, INTRO_DUR = 5.5;
   let clock = 0;
-  let animClock = 0; // время анимации парения (скорость регулируется, при reduced motion стоит)
+  let animClock = 0;
+  let landingBlend = 0; // время анимации парения (скорость регулируется, при reduced motion стоит)
 
   const sCamOf = (s: number) => street.sMin + (((s - street.sMin) % L) + L) % L;
+  const lapParams = () => ({
+    u: ((((controls.s - street.sMax) % (2 * L)) + 2 * L) % (2 * L)),
+    parity: landingParity,
+    pageNear: 55 * Math.max(0.7, profile.radius * adaptive.detail),
+    pageFloor: 0.08,
+  });
 
   const currentReveal = (): RevealParams => {
     const k = profile.radius * adaptive.detail;
@@ -205,6 +256,7 @@ async function main() {
       tanY: cam.tanY * 1.18,
       // парящие точки сдвинуты шейдером с настоящих мест — расширяем отсечение на величину сдвига
       pad: [2 + S.scatterBase + (reduceMotion ? 0 : S.driftFar + S.driftNear), S.scatterPerM],
+      lap: lapParams(),
       reveal,
       maxSorted: profile.maxSorted,
     };
@@ -233,6 +285,7 @@ async function main() {
     // «лимбо»: базовый разлёт несобранной частицы (м), + м на метр расстояния, парение рядом / вдали (м)
     float: [0, 0, 0, 0],
     motion: [1, 0.25, 0, 0],
+    lap: [0, -1, 30, 0.05],
   };
 
   const frame = (now: number) => {
@@ -255,6 +308,9 @@ async function main() {
       globalAlpha = 1;
       controls.basePitch = S.pitch;
     }
+    // на круге-лендинге взгляд чуть выше: в кадре поднимающееся полотно
+    landingBlend += ((landingParity >= 0 && lapOf(controls.s) === landingParity ? 1 : 0) - landingBlend) * Math.min(1, dt * 1.2);
+    controls.basePitch += 0.2 * landingBlend;
     controls.wheelGain = S.wheelGain;
     controls.smoothing = S.smoothing;
     cam.eye[1] = S.eye;
@@ -266,7 +322,7 @@ async function main() {
     cam.yaw = controls.yaw;
     cam.pitch = controls.pitch;
 
-    adaptive.frame(rawDt, lastSortMs);
+    adaptive.frame(rawDt, lastSortMs, streamer.busy);
     lastSortMs = null;
     if (Math.abs(adaptive.renderScale - lastScale) > 1e-3) {
       lastScale = adaptive.renderScale;
@@ -278,7 +334,7 @@ async function main() {
     streamTimer += dt;
     if (streamTimer > 0.15) {
       streamTimer = 0;
-      streamer.update(sCam, controls.velocity, reveal);
+      streamer.update(sCam, controls.velocity, reveal, lapParams());
     }
     streamer.processUploads();
     requestSort(sCam, reveal, streamer.dirty);
@@ -298,22 +354,32 @@ async function main() {
     // «лимбо»: разлёт несобранной частицы (м + м на метр дали), парение рядом / вдали (м)
     uni.float = [S.scatterBase, S.scatterPerM, reduceMotion ? 0 : S.driftNear, reduceMotion ? 0 : S.driftFar];
     uni.motion = [1.45 / Math.max(0.05, S.arrive), S.emBand, 0, 0];
+    const lp = lapParams();
+    uni.lap = [lp.u, lp.parity, lp.pageNear, lp.pageFloor];
     uni.lat = [reveal.latCenter, reveal.latInner, reveal.latOuter, reveal.latDensity];
     renderer.render(uni, LOOK.bg);
 
+    // рассказ привязан к позиции на кольце; на круге-лендинге его ведёт само полотно
+    const streetLap = landingParity < 0 || lapOf(controls.s) !== landingParity;
+    const st = story?.update(sCam, controls.s, streetLap, dt, clock);
     // метки появляются, когда улица уже свернулась в колесо и собралась из частиц
-    pois.update(sCam, kappa, cssW, cssH, globalAlpha * smoothstep(0.75, 1, introT));
-    hud.update(sCam);
+    pois.update(sCam, kappa, cssW, cssH, globalAlpha * smoothstep(0.75, 1, introT), (p) => {
+      if (!st || !p.chapter) return streetLap ? 1 : 0;
+      if ((p.kind === 'detection' || p.kind === 'asset') && !story!.revealed.has(p.id)) return 0;
+      return st.chapterAlpha[story!.chapterIndex(p.chapter)] ?? 0;
+    });
+    hud.update(sCam, st?.active ?? -1, streetLap);
 
     if (debug.visible) {
-      const st = streamer.stats();
+      const ss = streamer.stats();
       debug.set({
         quality: `${profile.name} (${q.gpu.slice(0, 28)})`,
         fps: adaptive.fps.toFixed(0),
         splats: `${(renderer.count / 1e6).toFixed(2)}M drawn / ${(sortStats.kept / 1e6).toFixed(2)}M kept / ${(sortStats.candidates / 1e6).toFixed(2)}M tested`,
-        loaded: `${(st.loadedSplats / 1e6).toFixed(2)}M in ${st.loadedChunks} chunks, ${st.inflight} loading`,
-        pool: `${(st.poolUsed * 100).toFixed(0)}% of ${(renderer.capacity / 1e6).toFixed(1)}M`,
-        network: `${(st.bytes / 1e6).toFixed(1)} MB`,
+        loaded: `${(ss.loadedSplats / 1e6).toFixed(2)}M in ${ss.loadedChunks} chunks, ${ss.inflight} loading`,
+        pool: `${(ss.poolUsed * 100).toFixed(0)}% of ${(renderer.capacity / 1e6).toFixed(1)}M`,
+        network: `${(ss.bytes / 1e6).toFixed(1)} MB`,
+        lap: streetLap ? 'street' : 'landing',
         sort: `${sortStats.ms.toFixed(0)} ms`,
         scale: `${adaptive.renderScale.toFixed(2)} res, ${adaptive.detail.toFixed(2)} detail, dpr ${dpr.toFixed(2)}`,
         s: `${sCam.toFixed(1)} (d to seam ${Math.abs(wrap(sCam - street.sMax, L)).toFixed(0)} m)`,
@@ -336,7 +402,7 @@ async function main() {
           const id = reqId++;
           return new Promise((res) => {
             picks.set(id, (hit) => res({ hit, ray: r, sCam: sCamOf(controls.s), kappa }));
-            sorter.postMessage({ type: 'pick', reqId: id, sCam: sCamOf(controls.s), kappa, origin: r.origin, dir: r.dir, reveal: currentReveal() } satisfies SortIn);
+            sorter.postMessage({ type: 'pick', reqId: id, sCam: sCamOf(controls.s), kappa, lap: lapParams(), origin: r.origin, dir: r.dir, reveal: currentReveal() } satisfies SortIn);
           });
         },
         bench(n = 20) {
@@ -353,7 +419,7 @@ async function main() {
 
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
-    status.textContent = 'Видеокарта сбросила контекст — перезагружаем…';
+    status.textContent = 'The graphics context was lost. Reloading…';
     setTimeout(() => location.reload(), 800);
   });
 }
@@ -361,5 +427,5 @@ async function main() {
 main().catch((e) => {
   console.error(e);
   const s = document.querySelector('#loader-status');
-  if (s && !s.textContent?.includes('WebGL')) s.textContent = 'Не удалось загрузить сцену: ' + (e?.message ?? e);
+  if (s && !s.textContent?.includes('WebGL')) s.textContent = 'Could not load the scene: ' + (e?.message ?? e);
 });

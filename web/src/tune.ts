@@ -62,39 +62,39 @@ interface Field {
 
 const GROUPS: { title: string; fields: Field[] }[] = [
   {
-    title: 'Движение',
+    title: 'Motion',
     fields: [
-      { key: 'driftFar', label: 'Парение вдали, м', min: 0, max: 6, step: 0.1 },
-      { key: 'driftNear', label: 'Парение частиц рядом, м', min: 0, max: 0.6, step: 0.01 },
-      { key: 'speed', label: 'Скорость парения', min: 0, max: 3, step: 0.05 },
-      { key: 'scatterBase', label: 'Разлёт перед сборкой, м', min: 0, max: 3, step: 0.05 },
-      { key: 'scatterPerM', label: 'Разлёт: + м на метр дали', min: 0, max: 0.15, step: 0.005 },
-      { key: 'emBand', label: 'Доля собирающихся', min: 0.05, max: 0.8, step: 0.01 },
-      { key: 'arrive', label: 'Прилёт догруженного, с', min: 0.2, max: 5, step: 0.1 },
-      { key: 'twinkle', label: 'Мерцание', min: 0, max: 1, step: 0.05 },
+      { key: 'driftFar', label: 'Far drift, m', min: 0, max: 6, step: 0.1 },
+      { key: 'driftNear', label: 'Near particle drift, m', min: 0, max: 0.6, step: 0.01 },
+      { key: 'speed', label: 'Drift speed', min: 0, max: 3, step: 0.05 },
+      { key: 'scatterBase', label: 'Scatter before assembly, m', min: 0, max: 3, step: 0.05 },
+      { key: 'scatterPerM', label: 'Scatter per metre of distance', min: 0, max: 0.15, step: 0.005 },
+      { key: 'emBand', label: 'Share still assembling', min: 0.05, max: 0.8, step: 0.01 },
+      { key: 'arrive', label: 'Streamed-in arrival, s', min: 0.2, max: 5, step: 0.1 },
+      { key: 'twinkle', label: 'Twinkle', min: 0, max: 1, step: 0.05 },
     ],
   },
   {
-    title: 'Проявление',
+    title: 'Reveal',
     fields: [
-      { key: 'densNear', label: 'Полная детализация, м', min: 2, max: 40, step: 0.5 },
-      { key: 'densPow', label: 'Крутизна спада', min: 0.5, max: 3, step: 0.05 },
-      { key: 'farDensity', label: 'Плотность вдали', min: 0, max: 0.15, step: 0.005 },
-      { key: 'partNear', label: 'Точки начинаются с, м', min: 0, max: 60, step: 1 },
-      { key: 'partFar', label: 'Только точки дальше, м', min: 10, max: 200, step: 1 },
-      { key: 'dotPx', label: 'Размер точки, px', min: 0.3, max: 3, step: 0.05 },
-      { key: 'partAlpha', label: 'Яркость точек', min: 0, max: 1, step: 0.05 },
+      { key: 'densNear', label: 'Full detail radius, m', min: 2, max: 40, step: 0.5 },
+      { key: 'densPow', label: 'Falloff steepness', min: 0.5, max: 3, step: 0.05 },
+      { key: 'farDensity', label: 'Far density', min: 0, max: 0.15, step: 0.005 },
+      { key: 'partNear', label: 'Dots start at, m', min: 0, max: 60, step: 1 },
+      { key: 'partFar', label: 'Dots only beyond, m', min: 10, max: 200, step: 1 },
+      { key: 'dotPx', label: 'Dot size, px', min: 0.3, max: 3, step: 0.05 },
+      { key: 'partAlpha', label: 'Dot brightness', min: 0, max: 1, step: 0.05 },
     ],
   },
   {
-    title: 'Камера и скролл',
+    title: 'Camera & scroll',
     fields: [
-      { key: 'eye', label: 'Высота глаз, м', min: 0.5, max: 8, step: 0.1 },
-      { key: 'pitch', label: 'Наклон вверх, рад', min: -0.3, max: 1.2, step: 0.01 },
-      { key: 'fov', label: 'Угол обзора, °', min: 40, max: 110, step: 1 },
-      { key: 'exposure', label: 'Экспозиция', min: 0.5, max: 2.5, step: 0.05 },
-      { key: 'wheelGain', label: 'Метров на px скролла', min: 0.005, max: 0.08, step: 0.001 },
-      { key: 'smoothing', label: 'Отклик скролла', min: 1, max: 15, step: 0.5 },
+      { key: 'eye', label: 'Eye height, m', min: 0.5, max: 8, step: 0.1 },
+      { key: 'pitch', label: 'Pitch up, rad', min: -0.3, max: 1.2, step: 0.01 },
+      { key: 'fov', label: 'Field of view, °', min: 40, max: 110, step: 1 },
+      { key: 'exposure', label: 'Exposure', min: 0.5, max: 2.5, step: 0.05 },
+      { key: 'wheelGain', label: 'Metres per scroll px', min: 0.005, max: 0.08, step: 0.001 },
+      { key: 'smoothing', label: 'Scroll response', min: 1, max: 15, step: 0.5 },
     ],
   },
 ];
@@ -128,7 +128,7 @@ export class TunePanel {
   constructor(root: HTMLElement, private s: Settings, private onChange: () => void) {
     this.btn = document.createElement('button');
     this.btn.className = 'tune-btn';
-    this.btn.setAttribute('aria-label', 'Настройки');
+    this.btn.setAttribute('aria-label', 'Settings');
     this.btn.setAttribute('aria-expanded', 'false');
     this.btn.innerHTML =
       '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
@@ -137,14 +137,14 @@ export class TunePanel {
     this.panel.className = 'tune-panel';
     this.panel.hidden = true;
     this.panel.innerHTML =
-      '<div class="tune-head"><b>Настройки</b><span><button data-act="copy">Копировать</button><button data-act="reset">Сброс</button></span></div>' +
+      '<div class="tune-head"><b>Settings</b><span><button data-act="copy">Copy</button><button data-act="reset">Reset</button></span></div>' +
       GROUPS.map(
         (g, gi) =>
           `<details${gi === 0 ? ' open' : ''}><summary>${g.title}</summary>` +
           g.fields
             .map(
               (f) =>
-                `<label class="tune-row" data-key="${f.key}" title="Двойной клик — значение по умолчанию"><span>${f.label}</span><output></output>` +
+                `<label class="tune-row" data-key="${f.key}" title="Double-click to reset"><span>${f.label}</span><output></output>` +
                 `<input type="range" min="${f.min}" max="${f.max}" step="${f.step}"></label>`,
             )
             .join('') +
@@ -173,8 +173,8 @@ export class TunePanel {
       const b = e.currentTarget as HTMLButtonElement;
       navigator.clipboard?.writeText(JSON.stringify(this.s, null, 2)).then(
         () => {
-          b.textContent = 'Скопировано';
-          setTimeout(() => (b.textContent = 'Копировать'), 1400);
+          b.textContent = 'Copied';
+          setTimeout(() => (b.textContent = 'Copy'), 1400);
         },
         () => {},
       );
