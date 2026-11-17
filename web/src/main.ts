@@ -12,6 +12,7 @@ import type { SortIn, SortOut, SortRequest } from './sort.worker';
 import { loadSettings, TunePanel } from './tune';
 import { Story, type StoryDef } from './story';
 import { Finale } from './finale';
+import { buildFloorText, floorTextBounds, type FloorTextSpec } from './floortext';
 import { FINALE_FLOAT } from './shaders';
 
 const params = new URLSearchParams(location.search);
@@ -60,7 +61,16 @@ async function main() {
     console.warn('story.json', e);
   }
   const landingOn = !!storyDef && !params.has('nolanding');
-  renderer.setSegments(manifest);
+  // «The loop goes on.» на асфальте: после плашки, перед тем как город собирается обратно
+  const floorSpec: FloorTextSpec = {
+    sCenter: street.sMax - 46,
+    w: LOOK.lane,
+    mpp: q.name === 'low' ? 0.04 : q.name === 'mid' ? 0.03 : 0.024,
+    segId: Math.max(manifest.segments.length, manifest.seam.id) + 1,
+    scaleLogMin: manifest.quant.scaleLogMin,
+    scaleLogMax: manifest.quant.scaleLogMax,
+  };
+  renderer.setSegments(manifest, landingOn ? [{ id: floorSpec.segId, ...floorTextBounds(floorSpec), flag: 2 }] : []);
 
   // ---- воркер сортировки
   const sorter = new Worker(new URL('./sort.worker.ts', import.meta.url), { type: 'module' });
@@ -131,9 +141,18 @@ async function main() {
   if (landingOn && params.has('landing')) controls.s = controls.sTarget = street.sMax + 4 + landingParity * L;
   // финал: текстовая плашка поверх рассыпанного в частицы города.
   // FIN_RAMP — за сколько метров после шва город рассыпается (и перед швом — собирается);
-  // плашка въезжает на FIN_A метрах круга и уходит вверх к FIN_B, когда город уже собирается
-  const FIN_RAMP = 40, FIN_A = 16, FIN_B = L - 24;
+  // плашка въезжает на FIN_A метрах круга и уходит вверх к FIN_B — дальше по асфальту идёт
+  // «The loop goes on.» (центр в L − 46 м), а за ним город собирается обратно
+  const FIN_RAMP = 40, FIN_A = 16, FIN_B = L - 72;
   const finale = landingOn ? new Finale(ui) : null;
+  if (landingOn) {
+    buildFloorText(floorSpec)
+      .then((chunk) => {
+        const b = floorTextBounds(floorSpec);
+        streamer.addText(chunk, b.bmin[0], b.bmin[0] + b.ext[0]);
+      })
+      .catch((e) => console.warn('floor text', e));
+  }
 
   // любая правка в панели → пересортировка с новыми параметрами
   let tuneVersion = 0;

@@ -2,6 +2,8 @@
 
 /** финал: разлёт (м + м на метр дали) и парение (м) рассыпанного города — сортировщик расширяет на них отсечение */
 export const FINALE_FLOAT = { scatter: 2.5, perM: 0.05, drift: 0.9 };
+/** надпись на асфальте: дальше FAR м — редкая пыль, ближе NEAR м — собрана целиком */
+export const FLOOR_TEXT_REVEAL = { near: 16, far: 75 };
 
 export const SPLAT_VS = /* glsl */ `#version 300 es
 precision highp float;
@@ -32,6 +34,8 @@ uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2
 const float FIN_SCATTER = ${FINALE_FLOAT.scatter.toFixed(3)};
 const float FIN_SCATTER_PER_M = ${FINALE_FLOAT.perM.toFixed(3)};
 const float FIN_DRIFT = ${FINALE_FLOAT.drift.toFixed(3)};
+const float TXT_NEAR = ${FLOOR_TEXT_REVEAL.near.toFixed(1)};
+const float TXT_FAR = ${FLOOR_TEXT_REVEAL.far.toFixed(1)};
 
 layout(location = 0) in uint a_index;
 
@@ -57,7 +61,8 @@ void main() {
   vec4 se = texelFetch(u_seg, ivec2(seg * 2 + 1, 0), 0);
   vec3 p = sb.xyz + vec3(float(A.x & 0xffffu), float(A.x >> 16u), float(A.y & 0xffffu)) * (se.xyz / 65535.0);
   float rank = float(A.y >> 16u) / 65535.0;
-  bool partOnly = sb.w > 0.5; // частицы шва
+  bool partOnly = sb.w > 0.5 && sb.w < 1.5; // частицы шва
+  bool isText = sb.w > 1.5;                  // финальная надпись на асфальте (floortext.ts)
 
   float sCam = u_ring.x, kappa = u_ring.y, L = u_ring.z, sMin = u_ring.w, sMax = u_ring2.x;
   float d = wrapd(p.x - sCam, L);
@@ -74,10 +79,19 @@ void main() {
   float gate = u_motion.z;
   bool finale = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5 && gate > 0.001;
   float lapX = (u_lap.x + d) - lapIdx * L;
-  float dis = finale ? gate * smoothstep(0.0, u_lap.z, lapX) * (1.0 - smoothstep(L - u_lap.z, L, lapX)) : 0.0;
+  float dis = finale && !isText ? gate * smoothstep(0.0, u_lap.z, lapX) * (1.0 - smoothstep(L - u_lap.z, L, lapX)) : 0.0;
 
   float dens, pf, densEm;
-  if (partOnly) {
+  float textEm = 0.0;
+  if (isText) {
+    if (!finale) return;
+    // надпись: вдали — редкая пыль, по мере приближения собирается целиком (у каждой точки свой момент)
+    float k = clamp((TXT_FAR - ad) / (TXT_FAR - TXT_NEAR), 0.0, 1.0);
+    textEm = smoothstep(rank * 0.35, rank * 0.35 + 0.55, k);
+    dens = gate;
+    densEm = 1.0;
+    pf = 0.0;
+  } else if (partOnly) {
     float t = smoothstep(u_part.x * 0.5, u_dens.y, ad);
     dens = mix(u_seamP.x, u_seamP.y, t);
     float e = abs(wrapd(p.x - sMax, L));
@@ -96,7 +110,7 @@ void main() {
     dens = mix(dens, min(dens, u_lap.w), dis);
     pf = max(pf, dis);
   }
-  float fade = 1.0 - smoothstep(dens * 0.82, dens, rank);
+  float fade = isText ? dens : 1.0 - smoothstep(dens * 0.82, dens, rank);
   if (fade <= 0.002) return;
 
   uint hsh = pcg(idx);
@@ -109,10 +123,12 @@ void main() {
   float birth = texelFetch(u_birth, ivec2(int(idx >> 11u), 0), 0).r;
   float arrive = clamp((u_misc.w - birth) * u_motion.x - rnd * 0.45, 0.0, 1.0);
   arrive = arrive * arrive * (3.0 - 2.0 * arrive);
+  // несобранная надпись — лишь малая часть её точек; остальные появляются по мере сборки
+  if (isText && rnd3 > mix(0.12, 1.0, smoothstep(0.0, 0.6, textEm))) return;
 
   // «собираются» только самые новые сплаты на данной дистанции (доля u_motion.y) — у порога видимости
   float band = u_motion.y;
-  float em = (densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
+  float em = (isText ? textEm : densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
   fade *= min(1.0, arrive * 4.0);
   em *= 1.0 - dis; // на финале ничего не «собрано»: всё парит частицами
   float pfE = max(pf, 1.0 - em);

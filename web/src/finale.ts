@@ -1,6 +1,7 @@
 // Финал рассказа — обычная текстовая плашка поверх сцены. Её прокручивает тот же скролл, что ведёт
 // колесо: на круге-финале город рассыпан в абстрактные частицы, плашка въезжает снизу, проезжает
-// и уходит вверх, а к концу круга город собирается обратно и рассказ начинается заново.
+// и уходит вверх; дальше на асфальте — «The loop goes on.», город собирается обратно,
+// и рассказ начинается заново.
 
 // ---------------------------------------------------------------------------------------------
 // COPY — текст финала (по документу City World Model). Правится свободно, вёрстка подстроится.
@@ -36,7 +37,7 @@ const COPY = {
   bitemporal: 'Seen in August. Known in October. Both dates kept.',
   principlesTitle: 'Principles',
   principles: ['Many frames, one look.', 'Not seeing it is not seeing it gone.', 'A resident report waits for a machine look.', 'Protect the event.'],
-  closing: ['The loop goes on.', 'Back to the street.'],
+  // финальная строка «The loop goes on.» — не здесь, а на асфальте после плашки (floortext.ts)
 };
 
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -93,11 +94,7 @@ export class Finale {
         <ol class="fi-principles">
           ${c.principles.map((t, i) => `<li><span class="fi-n">${n2(i)}</span>${esc(t)}</li>`).join('')}
         </ol>
-      </section>
-      <footer class="fi-end">
-        <p class="fi-loop">${esc(c.closing[0])}</p>
-        <p class="fi-back">${esc(c.closing[1])}</p>
-      </footer>`;
+      </section>`;
     root.prepend(el); // под шкалой глав, колесом-схемой и настройками
     this.el = el;
     const measure = () => (this.h = el.offsetHeight);

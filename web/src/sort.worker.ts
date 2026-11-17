@@ -12,6 +12,7 @@ interface WChunk {
   id: number;
   seg: number;
   partOnly: boolean;
+  text: boolean; // финальная надпись на асфальте: видна только на круге-финале
   n: number;
   pos: Float32Array;
   rank: Uint16Array;
@@ -73,6 +74,7 @@ export type SortIn =
       id: number;
       seg: number;
       partOnly: boolean;
+      text?: boolean;
       pos: Float32Array;
       rank: Uint16Array;
       alpha: Uint8Array;
@@ -94,7 +96,7 @@ const BIN = 0.05;
 let street: Street = { sMin: 0, sMax: 1, length: 1 };
 const chunks = new Map<number, WChunk>();
 let nb = 1;
-let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA;
+let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA, lutT = lutA;
 let depth = new Float32Array(0);
 let idx = new Uint32Array(0);
 let keys = new Uint16Array(0);
@@ -110,6 +112,7 @@ function ensureLut() {
     lutC = new Float32Array(nb);
     lutD = new Float32Array(nb);
     lutP = new Float32Array(nb);
+    lutT = new Float32Array(nb);
   }
 }
 
@@ -133,6 +136,7 @@ function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams =
     const lapIdx = Math.floor((lap.u + d) / L);
     const dis = dissolveAt(lap, lapIdx, lap.u + d - lapIdx * L, L);
     lutD[b] = dens + (Math.min(dens, lap.cap) - dens) * dis;
+    lutT[b] = lap.parity >= 0 && lap.gate > 0.001 && ((lapIdx % 2) + 2) % 2 === lap.parity ? 1 : 0;
   }
 }
 
@@ -175,7 +179,12 @@ function sort(req: SortRequest) {
 
   for (const c of chunks.values()) {
     let maxDens: number;
-    if (c.partOnly) {
+    if (c.text) {
+      maxDens = 0;
+      const b0 = binOf(c.s0), b1 = binOf(c.s1 - 1e-3);
+      const span = (((b1 - b0) % nb) + nb) % nb;
+      for (let k = 0, b = b0; k <= span; k++, b = (b + 1) % nb) if (lutT[b] > maxDens) maxDens = lutT[b];
+    } else if (c.partOnly) {
       maxDens = 0;
       for (let b = 0; b < nb; b += 8) if (lutP[b] > maxDens) maxDens = lutP[b];
     } else {
@@ -185,8 +194,8 @@ function sort(req: SortRequest) {
     }
     if (c.rankMin > maxDens + margin) continue;
     candidates += c.n;
-    const lut = c.partOnly ? lutP : lutD;
-    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly;
+    const lut = c.text ? lutT : c.partOnly ? lutP : lutD;
+    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly || c.text;
     for (let i = 0; i < n; i++) {
       const i3 = i * 3;
       const s = pos[i3], h = pos[i3 + 1], w = pos[i3 + 2];
@@ -257,7 +266,7 @@ function pick(req: PickRequest) {
   // так же, как глаз видит поверхность из множества полупрозрачных сплатов
   const hits: { t: number; a: number; s: number; h: number; w: number }[] = [];
   for (const c of chunks.values()) {
-    if (c.partOnly) continue;
+    if (c.partOnly || c.text) continue;
     const pos = c.pos, rank = c.rank, alpha = c.alpha, n = c.n;
     for (let i = 0; i < n; i++) {
       if (alpha[i] < 5) continue;
@@ -304,6 +313,7 @@ self.onmessage = (e: MessageEvent<SortIn>) => {
         id: m.id,
         seg: m.seg,
         partOnly: m.partOnly,
+        text: !!m.text,
         n: m.rank.length,
         pos: m.pos,
         rank: m.rank,
