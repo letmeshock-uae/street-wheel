@@ -17,6 +17,8 @@ export class Controls {
   wheelGain = 0.022;
   /** Отклик: насколько быстро позиция догоняет скролл (1/с) */
   smoothing = 4.5;
+  /** инверсия направления скролла и свайпа */
+  invert = false;
 
   private lookX = 0; // −1..1 позиция мыши
   private lookY = 0;
@@ -91,7 +93,7 @@ export class Controls {
     let dy = e.deltaY;
     if (e.deltaMode === 1) dy *= 16;
     else if (e.deltaMode === 2) dy *= window.innerHeight;
-    this.nudge(dy * this.wheelGain);
+    this.nudge(dy * this.wheelGain * (this.invert ? -1 : 1));
   };
 
   private onPointerDown = (e: PointerEvent) => {
@@ -139,7 +141,7 @@ export class Controls {
     const dy = t.clientY - this.touch.y;
     if (this.touch.axis === 'none' && Math.hypot(dx, dy) > 6) this.touch.axis = Math.abs(dy) >= Math.abs(dx) ? 'walk' : 'look';
     if (this.touch.axis === 'walk') {
-      const m = -dy * 0.07;
+      const m = -dy * 0.07 * (this.invert ? -1 : 1);
       this.nudge(m);
       this.touch.vy = 0.7 * this.touch.vy + 0.3 * (m / dt);
     } else if (this.touch.axis === 'look') {

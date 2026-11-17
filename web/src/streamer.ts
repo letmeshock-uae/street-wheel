@@ -4,7 +4,7 @@
 import type { DecodedChunk, Manifest } from './data';
 import type { DecodeJob, DecodeReply } from './decode.worker';
 import { PAGE, type SplatRenderer } from './renderer';
-import { densityAlong, wrap, type RevealParams, type Street } from './ring';
+import { densityAlong, smoothstep, wrap, type RevealParams, type Street } from './ring';
 import type { LapParams, SortIn } from './sort.worker';
 
 interface ChunkState {
@@ -142,8 +142,14 @@ export class Streamer {
         if (lap && lap.parity >= 0 && lap.gate > 0.001) {
           // на круге-лендинге улица — только редкая пыль: детальные тиры там не нужны
           const u = lap.u + wrap(sc - sCams[0], L);
-          const idx = Math.floor((u + wrap(x - sc, L)) / L);
-          if ((((idx % 2) + 2) % 2) === lap.parity) d = d + (Math.min(d, lap.cap) - d) * lap.gate;
+          const rel = u + wrap(x - sc, L);
+          const idx = Math.floor(rel / L);
+          if ((((idx % 2) + 2) % 2) === lap.parity) {
+            // на круге-лендинге город нужен только в зоне перехода
+            const lx = rel - idx * L;
+            const ramp = smoothstep(0, lap.morphRamp, lx) * (1 - smoothstep(L - lap.morphRamp, L, lx));
+            d = (d + (Math.min(d, lap.cap) - d) * lap.gate) * (1 - lap.gate * smoothstep(0.85, 1, ramp));
+          }
         }
         if (d > mx) mx = d;
       }

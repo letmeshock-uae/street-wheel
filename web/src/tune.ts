@@ -26,6 +26,7 @@ export interface Settings {
   exposure: number;
   wheelGain: number;
   smoothing: number;
+  invertScroll: number; // 0 / 1
 }
 
 export const DEFAULTS: Settings = {
@@ -50,6 +51,7 @@ export const DEFAULTS: Settings = {
   exposure: 1.15,
   wheelGain: 0.022,
   smoothing: 4.5,
+  invertScroll: 0,
 };
 
 interface Field {
@@ -58,6 +60,7 @@ interface Field {
   min: number;
   max: number;
   step: number;
+  toggle?: boolean;
 }
 
 const GROUPS: { title: string; fields: Field[] }[] = [
@@ -95,6 +98,7 @@ const GROUPS: { title: string; fields: Field[] }[] = [
       { key: 'exposure', label: 'Exposure', min: 0.5, max: 2.5, step: 0.05 },
       { key: 'wheelGain', label: 'Metres per scroll px', min: 0.005, max: 0.08, step: 0.001 },
       { key: 'smoothing', label: 'Scroll response', min: 1, max: 15, step: 0.5 },
+      { key: 'invertScroll', label: 'Invert scroll', min: 0, max: 1, step: 1, toggle: true },
     ],
   },
 ];
@@ -123,7 +127,7 @@ const decimals = (step: number) => Math.max(0, -Math.floor(Math.log10(step) + 1e
 export class TunePanel {
   private btn: HTMLButtonElement;
   private panel: HTMLElement;
-  private inputs = new Map<keyof Settings, { input: HTMLInputElement; out: HTMLOutputElement; f: Field }>();
+  private inputs = new Map<keyof Settings, { input: HTMLInputElement; out: HTMLOutputElement | null; f: Field }>();
 
   constructor(root: HTMLElement, private s: Settings, private onChange: () => void) {
     this.btn = document.createElement('button');
@@ -145,8 +149,10 @@ export class TunePanel {
           g.fields
             .map(
               (f) =>
-                `<label class="tune-row" data-key="${f.key}" title="Double-click to reset"><span>${f.label}</span><output></output>` +
-                `<input type="range" min="${f.min}" max="${f.max}" step="${f.step}"></label>`,
+                f.toggle
+                  ? `<label class="tune-row tune-toggle" data-key="${f.key}"><span>${f.label}</span><input type="checkbox"></label>`
+                  : `<label class="tune-row" data-key="${f.key}" title="Double-click to reset"><span>${f.label}</span><output></output>` +
+                    `<input type="range" min="${f.min}" max="${f.max}" step="${f.step}"></label>`,
             )
             .join('') +
           '</details>',
@@ -157,10 +163,13 @@ export class TunePanel {
       for (const f of g.fields) {
         const row = this.panel.querySelector(`[data-key="${f.key}"]`)!;
         const input = row.querySelector('input')!;
-        const out = row.querySelector('output')!;
+        const out = row.querySelector('output');
         this.inputs.set(f.key, { input, out, f });
-        input.addEventListener('input', () => this.set(f.key, Number(input.value)));
-        row.addEventListener('dblclick', () => this.set(f.key, DEFAULTS[f.key]));
+        if (f.toggle) input.addEventListener('change', () => this.set(f.key, input.checked ? 1 : 0));
+        else {
+          input.addEventListener('input', () => this.set(f.key, Number(input.value)));
+          row.addEventListener('dblclick', () => this.set(f.key, DEFAULTS[f.key]));
+        }
       }
     this.sync();
 
@@ -200,9 +209,15 @@ export class TunePanel {
   private sync(only?: keyof Settings) {
     for (const [k, { input, out, f }] of this.inputs) {
       if (only && k !== only) continue;
+      if (f.toggle) {
+        input.checked = this.s[k] > 0.5;
+        continue;
+      }
       input.value = String(this.s[k]);
-      out.textContent = this.s[k].toFixed(decimals(f.step));
-      out.classList.toggle('is-changed', Math.abs(this.s[k] - DEFAULTS[k]) > f.step / 2);
+      if (out) {
+        out.textContent = this.s[k].toFixed(decimals(f.step));
+        out.classList.toggle('is-changed', Math.abs(this.s[k] - DEFAULTS[k]) > f.step / 2);
+      }
     }
   }
 

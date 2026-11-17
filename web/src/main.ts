@@ -59,11 +59,12 @@ async function main() {
     console.warn('story.json', e);
   }
   const pageSpec: PageSpec = {
-    sFrom: street.sMin + 42,
-    sTo: street.sMax - 45,
+    sFrom: street.sMin + 25,
+    sTo: street.sMax - 22,
     width: 36,
     wLeft: LOOK.lane - 18,
-    mpp: q.name === 'low' ? 0.06 : q.name === 'mid' ? 0.05 : 0.04,
+    // разрешение текста: точка на 2.5 см — мелкие подписи остаются чёткими
+    mpp: q.name === 'low' ? 0.045 : q.name === 'mid' ? 0.032 : 0.025,
     segId: manifest.segments.length + 1,
     scaleLogMin: manifest.quant.scaleLogMin,
     scaleLogMax: manifest.quant.scaleLogMax,
@@ -137,14 +138,15 @@ async function main() {
   const lapOf = (sAbs: number) => Math.floor(((((sAbs - street.sMax) % (2 * L)) + 2 * L) % (2 * L)) / L);
   const landingParity = landingOn ? 1 - lapOf(controls.s) : -1;
   // ?landing — сразу на круг-лендинг, чуть перед началом полотна
-  if (landingOn && params.has('landing')) controls.s = controls.sTarget = pageSpec.sFrom - 30 + L;
+  if (landingOn && params.has('landing')) controls.s = controls.sTarget = pageSpec.sFrom - 6 + L;
   if (landingOn) {
     // полотно строится, пока человек идёт первый круг
     setTimeout(async () => {
       try {
         const { chunk, texture } = await buildLanding(pageSpec, storyDef!);
         renderer.setPageTexture(texture);
-        streamer.addPage(chunk, pageSpec.sFrom, pageSpec.sTo);
+        const pb = pageBounds(pageSpec);
+        streamer.addPage(chunk, pb.bmin[0], pb.bmin[0] + pb.ext[0]);
       } catch (e) {
         console.warn('landing', e);
       }
@@ -212,8 +214,8 @@ async function main() {
   const lapParams = () => ({
     u: ((((controls.s - street.sMax) % (2 * L)) + 2 * L) % (2 * L)),
     parity: landingParity,
-    pageNear: 55 * Math.max(0.7, profile.radius * adaptive.detail),
-    pageFloor: 0.08,
+    pageNear: 60 * Math.max(0.75, profile.radius * adaptive.detail),
+    pageFloor: 0.03,
     morphRamp: 40,
     ribbonC: LOOK.lane,
     ribbonHW: pageSpec.width / 2,
@@ -333,9 +335,10 @@ async function main() {
     }
     // на круге-лендинге взгляд чуть выше: в кадре поднимающееся полотно
     landingBlend += ((landingParity >= 0 && lapOf(controls.s) === landingParity ? 1 : 0) - landingBlend) * Math.min(1, dt * 1.2);
-    controls.basePitch += 0.3 * landingBlend;
+    controls.basePitch += 0.06 * landingBlend; // панели стоят вертикально — смотрим почти прямо
     controls.wheelGain = S.wheelGain;
     controls.smoothing = S.smoothing;
+    controls.invert = S.invertScroll > 0.5;
     cam.eye[1] = S.eye;
     cam.fovY = (S.fov * Math.PI) / 180;
 

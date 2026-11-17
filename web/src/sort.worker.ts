@@ -136,11 +136,14 @@ function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams =
     lutP[b] = densitySeamParticle(s, sCam, street, r);
     const lapIdx = Math.floor((lap.u + d) / L);
     const landing = lap.parity >= 0 && lap.gate > 0.001 && ((lapIdx % 2) + 2) % 2 === lap.parity;
-    lutD[b] = landing ? dens + (Math.min(dens, lap.cap) - dens) * lap.gate : dens;
     const lapX = lap.u + d - lapIdx * L;
-    lutM[b] = landing ? lap.gate * smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX)) : 0;
+    const ramp = smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX));
+    const cityLeft = landing ? 1 - lap.gate * smoothstep(0.85, 1, ramp) : 1;
+    lutD[b] = landing ? (dens + (Math.min(dens, lap.cap) - dens) * lap.gate) * cityLeft : dens;
+    if (landing) lutP[b] *= cityLeft;
+    lutM[b] = landing ? lap.gate * ramp : 0;
     const ad = Math.abs(d);
-    lutG[b] = landing ? lap.gate * Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 1.25))) : 0;
+    lutG[b] = landing ? lap.gate * Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 2.2))) : 0;
   }
 }
 
