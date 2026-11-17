@@ -30,6 +30,8 @@ export interface StoryDef {
   startS: number;
   chapters: Chapter[];
   markers: StoryMarker[];
+  /** текст финального полотна (круг-лендинг) */
+  landing?: { kicker?: string; headline?: string[]; sub?: string; principles?: string[]; closing?: string };
 }
 
 export interface StoryState {

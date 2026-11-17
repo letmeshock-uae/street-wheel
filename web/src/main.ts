@@ -142,7 +142,7 @@ async function main() {
     // полотно строится, пока человек идёт первый круг
     setTimeout(async () => {
       try {
-        const { chunk, texture } = await buildLanding(pageSpec, storyDef!, import.meta.env.BASE_URL + 'landing/');
+        const { chunk, texture } = await buildLanding(pageSpec, storyDef!);
         renderer.setPageTexture(texture);
         streamer.addPage(chunk, pageSpec.sFrom, pageSpec.sTo);
       } catch (e) {
@@ -200,7 +200,13 @@ async function main() {
   const INTRO_DELAY = 0.6, INTRO_DUR = 5.5;
   let clock = 0;
   let animClock = 0;
-  let landingBlend = 0; // время анимации парения (скорость регулируется, при reduced motion стоит)
+  let landingBlend = 0;
+  // лента — финал: на круге-улице она начинает собираться, когда человек доходит до конца рассказа
+  let landingGate = 0;
+  // полотно открывается только после того, как человек прошёл все шесть глав (?landing — сразу)
+  const visited = new Set<number>();
+  let visitedAll = params.has('landing');
+  const finaleFrom = (storyDef ? [...storyDef.chapters].sort((a, b) => a.start - b.start).at(-1)?.start ?? street.sMax - 40 : street.sMax - 40) - street.sMin; // время анимации парения (скорость регулируется, при reduced motion стоит)
 
   const sCamOf = (s: number) => street.sMin + (((s - street.sMin) % L) + L) % L;
   const lapParams = () => ({
@@ -212,6 +218,7 @@ async function main() {
     ribbonC: LOOK.lane,
     ribbonHW: pageSpec.width / 2,
     cap: 0.3,
+    gate: landingGate,
   });
 
   const currentReveal = (): RevealParams => {
@@ -244,7 +251,7 @@ async function main() {
   let lastSortKey = '';
   const requestSort = (sCam: number, reveal: RevealParams, force: boolean) => {
     if (sortBusy) return;
-    const key = [sCam.toFixed(3), kappa.toFixed(6), cam.yaw.toFixed(3), cam.pitch.toFixed(3), reveal.densNear.toFixed(2), cam.aspect.toFixed(3), cam.eye[1], tuneVersion].join('|');
+    const key = [sCam.toFixed(3), kappa.toFixed(6), cam.yaw.toFixed(3), cam.pitch.toFixed(3), reveal.densNear.toFixed(2), cam.aspect.toFixed(3), cam.eye[1], tuneVersion, landingGate.toFixed(3)].join('|');
     if (!force && key === lastSortKey) return;
     lastSortKey = key;
     streamer.dirty = false;
@@ -317,6 +324,13 @@ async function main() {
       globalAlpha = 1;
       controls.basePitch = S.pitch;
     }
+    {
+      const onLanding = landingParity >= 0 && lapOf(controls.s) === landingParity;
+      const camX = ((((controls.s - street.sMax) % L) + L) % L); // место камеры внутри круга, от шва
+      const target = landingParity < 0 || !visitedAll ? 0 : onLanding ? 1 : smoothstep(finaleFrom, finaleFrom + 28, camX);
+      landingGate += (target - landingGate) * Math.min(1, dt * 2.5);
+      if (Math.abs(target - landingGate) < 1e-3) landingGate = target;
+    }
     // на круге-лендинге взгляд чуть выше: в кадре поднимающееся полотно
     landingBlend += ((landingParity >= 0 && lapOf(controls.s) === landingParity ? 1 : 0) - landingBlend) * Math.min(1, dt * 1.2);
     controls.basePitch += 0.3 * landingBlend;
@@ -362,7 +376,7 @@ async function main() {
     uni.seamP = [reveal.seamPDensNear, reveal.seamPDensFar, S.exposure, canvas.height * 0.45];
     // «лимбо»: разлёт несобранной частицы (м + м на метр дали), парение рядом / вдали (м)
     uni.float = [S.scatterBase, S.scatterPerM, reduceMotion ? 0 : S.driftNear, reduceMotion ? 0 : S.driftFar];
-    uni.motion = [1.45 / Math.max(0.05, S.arrive), S.emBand, 0, 0];
+    uni.motion = [1.45 / Math.max(0.05, S.arrive), S.emBand, landingGate, 0];
     const lp = lapParams();
     uni.lap = [lp.u, lp.parity, lp.pageNear, lp.pageFloor];
     uni.lap2 = [lp.morphRamp, lp.ribbonC, lp.ribbonHW, lp.cap];
@@ -370,8 +384,13 @@ async function main() {
     renderer.render(uni, LOOK.bg);
 
     // рассказ привязан к позиции на кольце; на круге-лендинге его ведёт само полотно
-    const streetLap = landingParity < 0 || lapOf(controls.s) !== landingParity;
+    // круг считается лендингом, только если полотно на нём действительно показано
+    const streetLap = landingParity < 0 || lapOf(controls.s) !== landingParity || landingGate < 0.5;
     const st = story?.update(sCam, controls.s, streetLap, dt, clock);
+    if (st && streetLap && st.chapterAlpha[st.active] > 0.5) {
+      visited.add(st.active);
+      if (story && visited.size >= story.chapters.length) visitedAll = true;
+    }
     // метки появляются, когда улица уже свернулась в колесо и собралась из частиц
     pois.update(sCam, kappa, cssW, cssH, globalAlpha * smoothstep(0.75, 1, introT), (p) => {
       if (!st || !p.chapter) return streetLap ? 1 : 0;

@@ -1,10 +1,12 @@
-// "Landing lap": on every other lap the street dissolves and its particles assemble into a white
-// page lying along the rim of the wheel. The page is drawn on a 2D canvas and turned into splats:
-// paper = big soft white splats, body text = 4 cm dots, headlines and pictures = halftone mosaic.
+// "Landing lap" — the finale of the story. The street dissolves; its particles collapse onto the rim
+// and only those that land on letters survive, while the page's own text splats assemble the copy.
+// No background: white text and thin line graphics, made of particles, lying on the rim in perspective.
 //
-// Orientation: canvas x → w (right), canvas y → −s. The top of every line points away from the
-// viewer, so the text stands upright on the part of the wheel that rises ahead. Sections are stacked
-// bottom-up: the first one to read is the nearest.
+// The page is drawn on a 2D canvas (black background, white ink) and turned into splats: flat discs on
+// the rim — they foreshorten together with the text, so lines never run into each other.
+// Orientation: canvas x → w (right), canvas y → −s. The top of every line points away from the viewer,
+// so the text stands upright on the part of the wheel that rises ahead. Sections are stacked bottom-up:
+// the first one to read is the nearest.
 import type { DecodedChunk } from './data';
 import type { Chapter, StoryDef } from './story';
 
@@ -23,11 +25,12 @@ export function pageBounds(sp: PageSpec): { bmin: [number, number, number]; ext:
   return { bmin: [sp.sFrom - 0.05, -0.02, sp.wLeft - 0.05], ext: [sp.sTo - sp.sFrom + 0.1, 0.08, sp.width + 0.1] };
 }
 
-const INK = '#141414';
-const ACCENT = '#c98a1b';
-const OK = '#2f8f4e';
-const NO = '#c8432f';
-const PAPER: [number, number, number] = [246, 244, 239];
+const INK = '#ffffff';
+const SOFT = '#dcd8d0';
+const MUTED = '#8f8b84';
+const ACCENT = '#ffc35a';
+const OK = '#7fe0a0';
+const NO = '#ff6b57';
 const FONT = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif';
 
 interface Region {
@@ -36,58 +39,46 @@ interface Region {
   w: number;
   h: number;
   stride: number;
-  color: boolean;
 }
 
-function loadImage(url: string): Promise<HTMLImageElement | null> {
-  return new Promise((res) => {
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = () => res(null);
-    im.src = url;
-  });
-}
-
-export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: string): Promise<{ chunk: DecodedChunk; texture: HTMLCanvasElement }> {
+export async function buildLanding(sp: PageSpec, story: StoryDef): Promise<{ chunk: DecodedChunk; texture: HTMLCanvasElement }> {
   // шрифт должен быть загружен до рисования, иначе canvas возьмёт запасной
   try {
-    await Promise.all([document.fonts.load('700 100px Inter'), document.fonts.load('400 100px Inter'), document.fonts.load('600 100px Inter')]);
+    await Promise.all(['400', '500', '600', '700'].map((w) => document.fonts.load(`${w} 100px Inter`)));
   } catch {
     /* запасной шрифт тоже подойдёт */
   }
   const P = 1 / sp.mpp; // px per metre
   const W = Math.round(sp.width * P);
-  const H = Math.round((sp.sTo - sp.sFrom) * P);
+  // Анаморфоза, как у разметки на асфальте: вёрстка в «видимых» метрах растягивается вдоль улицы
+  // в A раз. На подъёме ленты (там её и читают) перспектива сжимает её обратно в нормальные пропорции.
+  const LAYOUT_LEN = 146;
+  const H = Math.round(LAYOUT_LEN * P);
+  const A = (sp.sTo - sp.sFrom) / LAYOUT_LEN;
   const cv = document.createElement('canvas');
   cv.width = W;
   cv.height = H;
   const ctx = cv.getContext('2d', { willReadFrequently: true })!;
-  ctx.fillStyle = `rgb(${PAPER.join(',')})`;
+  ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
   ctx.textBaseline = 'alphabetic';
   const regions: Region[] = [];
   const m = (v: number) => v * P;
   const font = (sizeM: number, weight = 400) => `${weight} ${m(sizeM).toFixed(1)}px ${FONT}`;
+  type Ctx2 = CanvasRenderingContext2D & { letterSpacing?: string };
 
-  const [imCapture, imDetect, imRefresh] = await Promise.all([
-    loadImage(imageBase + 'capture.jpg'),
-    loadImage(imageBase + 'detect.jpg'),
-    loadImage(imageBase + 'refresh.jpg'),
-  ]);
-
-  const text = (t: string, xM: number, yM: number, sizeM: number, weight = 400, color = INK, spacing = 0) => {
+  const text = (t: string, xM: number, yM: number, sizeM: number, weight = 500, color = INK, spacing = 0) => {
     ctx.font = font(sizeM, weight);
     ctx.fillStyle = color;
-    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${m(spacing).toFixed(1)}px`;
+    (ctx as Ctx2).letterSpacing = `${m(spacing).toFixed(1)}px`;
     ctx.fillText(t, m(xM), m(yM));
-    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px';
+    (ctx as Ctx2).letterSpacing = '0px';
   };
-  const wrap = (t: string, sizeM: number, maxM: number, weight = 400) => {
+  const wrap = (t: string, sizeM: number, maxM: number, weight: number) => {
     ctx.font = font(sizeM, weight);
-    const words = t.split(/\s+/);
     const lines: string[] = [];
     let line = '';
-    for (const w of words) {
+    for (const w of t.split(/\s+/)) {
       const test = line ? line + ' ' + w : w;
       if (ctx.measureText(test).width > m(maxM) && line) {
         lines.push(line);
@@ -97,20 +88,14 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     if (line) lines.push(line);
     return lines;
   };
-  const para = (t: string, xM: number, yM: number, sizeM: number, maxM: number, lh = 1.4, color = INK) => {
-    const lines = wrap(t, sizeM, maxM, 500);
-    lines.forEach((l, i) => text(l, xM, yM + i * sizeM * lh, sizeM, 500, color));
+  const para = (t: string, xM: number, yM: number, sizeM: number, maxM: number, lh = 1.4, color = SOFT, weight = 500) => {
+    const lines = wrap(t, sizeM, maxM, weight);
+    lines.forEach((l, i) => text(l, xM, yM + i * sizeM * lh, sizeM, weight, color));
     return lines.length * sizeM * lh;
   };
-  const halftone = (xM: number, yM: number, wM: number, hM: number, stride: number, color: boolean) =>
-    regions.push({ x: Math.floor(m(xM)), y: Math.floor(m(yM)), w: Math.ceil(m(wM)), h: Math.ceil(m(hM)), stride, color });
-  const cover = (im: HTMLImageElement, xM: number, yM: number, wM: number, hM: number, sx = 0, sy = 0, sw = 1, sh = 1) => {
-    // object-fit: cover by the crop window (sx,sy,sw,sh in 0..1 of the source)
-    const iw = im.naturalWidth * sw, ih = im.naturalHeight * sh;
-    const r = Math.max(m(wM) / iw, m(hM) / ih);
-    const cw = m(wM) / r, ch = m(hM) / r;
-    ctx.drawImage(im, im.naturalWidth * sx + (iw - cw) / 2, im.naturalHeight * sy + (ih - ch) / 2, cw, ch, m(xM), m(yM), m(wM), m(hM));
-  };
+  // крупное — полутоновой мозаикой из точек
+  const halftone = (xM: number, yM: number, wM: number, hM: number, stride: number) =>
+    regions.push({ x: Math.floor(m(xM)), y: Math.floor(m(yM)), w: Math.ceil(m(wM)), h: Math.ceil(m(hM)), stride });
   const line = (x0: number, y0: number, x1: number, y1: number, wM: number, color = INK) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = m(wM);
@@ -120,14 +105,36 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     ctx.lineTo(m(x1), m(y1));
     ctx.stroke();
   };
+  const brackets = (x: number, y: number, w: number, h: number, len: number, lw: number, color: string) => {
+    for (const [cx, cy, dx, dy] of [
+      [x, y, 1, 1],
+      [x + w, y, -1, 1],
+      [x, y + h, 1, -1],
+      [x + w, y + h, -1, -1],
+    ]) {
+      line(cx, cy, cx + dx * len, cy, lw, color);
+      line(cx, cy, cx, cy + dy * len, lw, color);
+    }
+  };
 
-  // ---------- layout: sections from the bottom (nearest) up
+  // ---------- layout: sections from the bottom (nearest) up; units are layout metres
   const cats = [...new Set(story.markers.filter((k) => k.kind === 'detection').map((k) => k.category ?? k.title))];
+  const SHORT: Record<string, string> = {
+    'Street light': 'Street lights',
+    'Illegal advertising': 'Illegal ads',
+    'Fence damage': 'Fences',
+    Graffiti: 'Graffiti',
+    'Road damage': 'Road damage',
+  };
+  const short = (c: string) => SHORT[c] ?? c;
   const chapters = [...story.chapters].sort((a, b) => a.start - b.start);
-  const left = 3; // margin, m
-  const colX = 11.5; // text column for steps
-  const colW = sp.width - colX - 3;
-  let cursor = H / P; // in metres, bottom of the next section
+  const Wm = sp.width;
+  const left = 2.4;
+  const colX = 10.2; // text column
+  const colW = 11.6;
+  const gX = 23; // graphic column
+  const gW = Wm - gX - 2.2;
+  let cursor = H / P;
 
   const section = (hM: number, draw: (top: number) => void) => {
     const top = cursor - hM;
@@ -135,136 +142,117 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     cursor = top;
   };
 
+  const copy = story.landing ?? {};
   // 1) hero
-  section(26, (t) => {
-    text('CITY WORLD MODEL', left, t + 3.6, 1.4, 700, ACCENT, 0.4);
-    text('The city,', left, t + 10, 6, 700);
-    text('as a loop.', left, t + 16.4, 6, 700);
-    halftone(left - 0.5, t + 4.4, sp.width - 2 * left + 1, 13, 3, false);
-    para('Captured, checked, understood, updated. Every day.', left, t + 20.6, 1.5, sp.width - 2 * left, 1.3);
+  section(20, (t) => {
+    text(copy.kicker ?? 'CITY WORLD MODEL', left, t + 2.8, 1.3, 700, ACCENT, 0.35);
+    const hl = copy.headline ?? ['The city,', 'as a loop.'];
+    hl.slice(0, 2).forEach((l, i) => text(l, left, t + 8 + i * 5, 4.6, 700));
+    halftone(left - 0.5, t + 3.9, Wm - 2 * left + 1, 10.2, 2);
+    para(copy.sub ?? 'Captured, checked, understood, updated. Every day.', left, t + 16.2, 1.3, Wm - 2 * left, 1.35);
   });
 
   // 2) the loop diagram — the wheel, again
-  section(30, (t) => {
-    const cx = sp.width / 2, cy = t + 15, R = 9.5;
+  section(23, (t) => {
+    const cx = Wm / 2, cy = t + 11.5, R = 7.2;
     ctx.strokeStyle = INK;
-    ctx.lineWidth = m(0.16);
+    ctx.lineWidth = m(0.14);
     ctx.beginPath();
     ctx.arc(m(cx), m(cy), m(R), 0, Math.PI * 2);
     ctx.stroke();
     chapters.forEach((c, i) => {
-      // 01 at the bottom (nearest), then clockwise as on the HUD wheel
+      // 01 at the bottom (nearest), then around the circle
       const a = Math.PI / 2 - (i / chapters.length) * Math.PI * 2;
       const nx = cx + Math.cos(a) * R, ny = cy + Math.sin(a) * R;
       ctx.fillStyle = i === 0 ? ACCENT : INK;
       ctx.beginPath();
-      ctx.arc(m(nx), m(ny), m(1.25), 0, Math.PI * 2);
+      ctx.arc(m(nx), m(ny), m(1.05), 0, Math.PI * 2);
       ctx.fill();
       ctx.textAlign = 'center';
-      text(String(i + 1).padStart(2, '0'), nx, ny + 0.42, 1.1, 700, '#fff');
-      const lx = cx + Math.cos(a) * (R + 2.4), ly = cy + Math.sin(a) * (R + 2.4);
-      ctx.textAlign = Math.cos(a) > 0.3 ? 'left' : Math.cos(a) < -0.3 ? 'right' : 'center';
-      text(c.title, lx, ly + 0.55 + (Math.abs(Math.cos(a)) <= 0.3 ? Math.sign(Math.sin(a)) * 1.2 : 0), 1.5, 700);
+      text(String(i + 1).padStart(2, '0'), nx, ny + 0.38, 1.0, 700, '#000');
+      const ca = Math.cos(a), sa = Math.sin(a);
+      ctx.textAlign = ca > 0.3 ? 'left' : ca < -0.3 ? 'right' : 'center';
+      const lx = cx + ca * (R + 1.8), ly = cy + sa * (R + 1.8) + 0.45 + (Math.abs(ca) <= 0.3 ? Math.sign(sa) * 1.0 : 0);
+      text(c.title, lx, ly, 1.3, 700);
       ctx.textAlign = 'left';
     });
     ctx.textAlign = 'center';
-    text('every day', cx, cy + 0.6, 2.2, 300, '#555');
+    text('every day', cx, cy + 0.6, 1.8, 400, MUTED);
     ctx.textAlign = 'left';
   });
 
-  // 3..8) the six steps
+  // 3..8) the six steps: number | title + line | line graphic
   const step = (c: Chapter, i: number, draw: (x: number, y: number, w: number, h: number) => void) =>
-    section(26, (t) => {
-      text(String(i + 1).padStart(2, '0'), left - 0.3, t + 9.5, 7.5, 700, ACCENT);
-      halftone(left - 0.6, t + 2, colX - left, 8.4, 3, false);
-      text(c.title, colX, t + 4.4, 3, 700);
-      halftone(colX - 0.3, t + 1.6, colW + 0.6, 3.6, 2, false);
-      const used = para(c.short ?? c.body, colX, t + 7.1, 1.7, colW, 1.25, '#222');
-      const gy = t + 6.9 + used + 0.3;
-      draw(colX, gy, colW, t + 25 - gy);
+    section(13, (t) => {
+      text(String(i + 1).padStart(2, '0'), left - 0.2, t + 7.6, 5.6, 700, ACCENT);
+      halftone(left - 0.5, t + 2.6, colX - left - 0.3, 6, 2);
+      text(c.title, colX, t + 3.2, 2.1, 700);
+      para(c.short ?? c.body, colX, t + 5.5, 1.25, colW, 1.4);
+      draw(gX, t + 1.2, gW, 10.6);
     });
 
   const byWidget = (w: string) => chapters.findIndex((c) => c.widget === w);
   const steps: [string, (x: number, y: number, w: number, h: number) => void][] = [
     [
       'capture',
-      (x, y, w, h) => {
-        if (imCapture) {
-          cover(imCapture, x, y, w, h);
-          halftone(x, y, w, h, 3, true);
-        }
-        text('● REC', x + 0.8, y + 1.6, 0.8, 700, NO);
-        text('own cameras  ·  driver fleet', x + w - 13, y + h + 1.2, 0.75, 500, '#666');
+      (x, y, w) => {
+        brackets(x, y, w, 6.4, 1.6, 0.16, INK);
+        ctx.fillStyle = NO;
+        ctx.beginPath();
+        ctx.arc(m(x + 1.3), m(y + 1.6), m(0.4), 0, Math.PI * 2);
+        ctx.fill();
+        text('REC', x + 2.0, y + 2.0, 1.0, 700, NO);
+        text('own cameras', x + 1.3, y + 4.2, 1.05, 600, INK);
+        text('driver fleet', x + 1.3, y + 5.7, 1.05, 600, INK);
       },
     ],
     [
       'gate',
       (x, y, w, h) => {
-        const cols = 4, rows = 2, gap = 0.7;
-        const fw = (w - gap * (cols - 1)) / cols, fh = (h - gap * (rows - 1) - 1.8) / rows;
-        const verdict = [1, 0, 1, 1, 1, 0, 1, 0];
+        const cols = 3, rows = 2, gap = 0.6;
+        const fw = (w - gap * (cols - 1)) / cols, fh = (h - 2.4 - gap) / rows;
+        const verdict = [1, 0, 1, 1, 1, 0];
         for (let r = 0; r < rows; r++)
           for (let k = 0; k < cols; k++) {
             const i = r * cols + k;
             const fx = x + k * (fw + gap), fy = y + r * (fh + gap);
-            if (imCapture) {
-              ctx.globalAlpha = verdict[i] ? 1 : 0.35;
-              cover(imCapture, fx, fy, fw, fh, (i * 0.11) % 0.6, ((i * 0.23) % 0.5), 0.4, 0.5);
-              ctx.globalAlpha = 1;
-            }
-            if (!verdict[i]) {
-              line(fx + 0.6, fy + 0.6, fx + fw - 0.6, fy + fh - 0.6, 0.22, NO);
-              line(fx + fw - 0.6, fy + 0.6, fx + 0.6, fy + fh - 0.6, 0.22, NO);
+            ctx.strokeStyle = verdict[i] ? INK : MUTED;
+            ctx.lineWidth = m(0.12);
+            ctx.strokeRect(m(fx), m(fy), m(fw), m(fh));
+            if (verdict[i]) {
+              line(fx + fw * 0.3, fy + fh * 0.55, fx + fw * 0.45, fy + fh * 0.72, 0.2, OK);
+              line(fx + fw * 0.45, fy + fh * 0.72, fx + fw * 0.72, fy + fh * 0.3, 0.2, OK);
             } else {
-              line(fx + fw - 2.2, fy + fh - 1.1, fx + fw - 1.6, fy + fh - 0.6, 0.2, OK);
-              line(fx + fw - 1.6, fy + fh - 0.6, fx + fw - 0.6, fy + fh - 1.8, 0.2, OK);
+              line(fx + fw * 0.3, fy + fh * 0.3, fx + fw * 0.7, fy + fh * 0.7, 0.2, NO);
+              line(fx + fw * 0.7, fy + fh * 0.3, fx + fw * 0.3, fy + fh * 0.7, 0.2, NO);
             }
           }
-        halftone(x, y, w, h - 1.8, 3, true);
-        text('passed', x, y + h - 0.2, 0.8, 600, OK);
-        text('rejected', x + 4.5, y + h - 0.2, 0.8, 600, NO);
+        text('passed', x, y + h - 0.2, 1.0, 700, OK);
+        text('rejected', x + w * 0.5, y + h - 0.2, 1.0, 700, NO);
       },
     ],
     [
       'detect',
-      (x, y, w, h0) => {
-        if (imDetect) {
-          // картинка без обрезки, чтобы рамки совпали с объектами на кадре
-          const h = Math.min(h0, w / (imDetect.naturalWidth / imDetect.naturalHeight));
-          cover(imDetect, x, y, w, h);
-          // boxes over the objects in the picture (relative coordinates of the render)
-          // доли кадра public/landing/detect.jpg (800×604, s = −14)
-          const boxes: [number, number, number, number, string][] = [
-            [0.21, 0.49, 0.065, 0.1, 'signage'],
-            [0.29, 0.39, 0.13, 0.2, 'wall'],
-            [0.78, 0.23, 0.05, 0.25, 'street light'],
-            [0.44, 0.71, 0.21, 0.15, 'road surface'],
-          ];
-          ctx.strokeStyle = ACCENT;
-          ctx.lineWidth = m(0.2);
-          for (const [bx, by, bw, bh, label] of boxes) {
-            ctx.strokeRect(m(x + bx * w), m(y + by * h), m(bw * w), m(bh * h));
-            text(label, x + bx * w, y + by * h - 0.35, 0.65, 700, ACCENT);
-          }
-          halftone(x, y, w, h, 3, true);
-        }
+      (x, y) => {
+        cats.forEach((cat, i) => {
+          const ry = y + 0.4 + i * 2.0;
+          brackets(x, ry, 1.4, 1.4, 0.45, 0.12, ACCENT);
+          text(short(cat), x + 2.2, ry + 1.15, 1.05, 600, INK);
+        });
       },
     ],
     [
       'registry',
       (x, y, w) => {
-        const rh = 1.75;
-        text('Category', x, y + 1.1, 0.8, 700, '#777');
-        text('Records', x + w * 0.62, y + 1.1, 0.8, 700, '#777');
-        text('Status', x + w * 0.82, y + 1.1, 0.8, 700, '#777');
-        line(x, y + 1.7, x + w, y + 1.7, 0.08);
+        const rh = 1.9;
         cats.forEach((cat, i) => {
-          const ry = y + 1.7 + (i + 1) * rh;
+          const ry = y + 1.4 + i * rh;
           const n = story.markers.filter((k) => (k.category ?? k.title) === cat && k.kind !== 'info').length;
-          text(cat, x, ry - 0.5, 0.95, 500);
-          text(String(n), x + w * 0.62, ry - 0.5, 0.95, 700);
-          text('open', x + w * 0.82, ry - 0.5, 0.85, 600, ACCENT);
-          line(x, ry, x + w, ry, 0.04, '#bbb');
+          text(short(cat), x, ry, 1.15, 600);
+          ctx.textAlign = 'right';
+          text(String(n), x + w, ry, 1.15, 700, ACCENT);
+          ctx.textAlign = 'left';
+          line(x, ry + 0.55, x + w, ry + 0.55, 0.05, MUTED);
         });
       },
     ],
@@ -274,39 +262,35 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
         ctx.strokeStyle = INK;
         ctx.lineWidth = m(0.12);
         ctx.beginPath();
-        ctx.roundRect(m(x), m(y), m(w), m(h), m(1));
+        ctx.roundRect(m(x), m(y), m(w), m(h - 0.4), m(0.8));
         ctx.stroke();
-        text('CASE 01', x + 1.2, y + 2, 0.8, 700, ACCENT, 0.15);
-        text(`One street, ${cats.length} kinds of issues`, x + 1.2, y + 4.2, 1.35, 700);
+        text('CASE 01', x + 0.9, y + 1.8, 1.0, 700, ACCENT, 0.12);
+        text(`${cats.length} issues, one street`, x + 0.9, y + 3.6, 1.15, 700);
         cats.forEach((cat, i) => {
           ctx.fillStyle = ACCENT;
           ctx.beginPath();
-          ctx.arc(m(x + 1.6), m(y + 6.1 + i * 1.45 - 0.3), m(0.28), 0, Math.PI * 2);
+          ctx.arc(m(x + 1.2), m(y + 5.3 + i * 1.25 - 0.32), m(0.25), 0, Math.PI * 2);
           ctx.fill();
-          text(cat, x + 2.4, y + 6.1 + i * 1.45, 0.9, 500, '#333');
+          text(short(cat), x + 1.9, y + 5.3 + i * 1.25, 1.0, 500, SOFT);
         });
       },
     ],
     [
       'refresh',
-      (x, y, w, h) => {
-        if (imRefresh) {
-          cover(imRefresh, x, y, w * 0.48, h);
-          halftone(x, y, w * 0.48, h, 3, true);
-        }
-        const tx = x + w * 0.54;
-        text('Road damage', tx, y + 2.2, 1.0, 600);
-        line(tx, y + 1.85, tx + 7.3, y + 1.85, 0.12, NO);
-        text('repaired · closed', tx, y + 3.7, 0.85, 600, OK);
+      (x, y) => {
+        text('Road damage', x, y + 1.6, 1.15, 700);
+        line(x, y + 1.2, x + 8.2, y + 1.2, 0.14, NO);
+        text('repaired · closed', x, y + 3.2, 1.0, 700, OK);
+        const ax = x + 3.4, ay = y + 7.4, ar = 2.3;
         ctx.strokeStyle = INK;
-        ctx.lineWidth = m(0.18);
-        const ax = tx + 4, ay = y + 8.8, ar = 2.6;
+        ctx.lineWidth = m(0.16);
         ctx.beginPath();
         ctx.arc(m(ax), m(ay), m(ar), -Math.PI * 0.35, Math.PI * 1.45);
         ctx.stroke();
-        line(ax + ar * Math.cos(-Math.PI * 0.35), ay + ar * Math.sin(-Math.PI * 0.35), ax + ar * Math.cos(-Math.PI * 0.35) - 1.1, ay + ar * Math.sin(-Math.PI * 0.35) - 0.2, 0.18);
-        line(ax + ar * Math.cos(-Math.PI * 0.35), ay + ar * Math.sin(-Math.PI * 0.35), ax + ar * Math.cos(-Math.PI * 0.35) + 0.1, ay + ar * Math.sin(-Math.PI * 0.35) - 1.1, 0.18);
-        text('back to 01', tx, y + h - 0.4, 0.85, 600, '#666');
+        const ex = ax + ar * Math.cos(-Math.PI * 0.35), ey = ay + ar * Math.sin(-Math.PI * 0.35);
+        line(ex, ey, ex - 1.0, ey - 0.15, 0.16);
+        line(ex, ey, ex + 0.1, ey - 1.0, 0.16);
+        text('back to 01', ax + ar + 0.9, ay + 0.4, 1.0, 600, MUTED);
       },
     ],
   ];
@@ -315,42 +299,50 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
     if (i >= 0) step(chapters[i], i, draw);
   }
 
-  // closing (whatever room is left)
-  if (cursor > 6) {
-    section(Math.min(cursor, 14), (t) => {
-      text('Keep walking.', left, t + 5.5, 3, 700);
-      halftone(left - 0.5, t + 2.6, sp.width - 2 * left, 3.6, 3, false);
-      text('The street comes back on the next lap.', left, t + 8, 1, 400, '#555');
+  // principles — коротко, крупно, по одной мысли
+  const principles = copy.principles ?? [];
+  if (principles.length) {
+    section(4.5 + principles.length * 3.4, (t) => {
+      text('PRINCIPLES', left, t + 2.4, 1.2, 700, ACCENT, 0.35);
+      principles.forEach((p, i) => {
+        const y = t + 5.4 + i * 3.4;
+        text(String(i + 1).padStart(2, '0'), left, y, 1.0, 700, MUTED);
+        para(p, left + 3, y, 1.45, Wm - left - 5, 1.3, INK, 600);
+      });
     });
   }
 
-  // ---------- canvas → splats
+  // closing (whatever room is left)
+  if (cursor > 4) {
+    section(Math.min(cursor, 8), (t) => {
+      text(copy.closing ?? 'Back to the street.', left, t + 4.6, 2.6, 700);
+      halftone(left - 0.5, t + 2, Wm - 2 * left, 3.4, 2);
+    });
+  }
+  if (cursor < 0) console.warn(`landing: content is ${(-cursor).toFixed(1)} m longer than the page`);
+
+  // ---------- canvas → splats. Всё — плоские диски на ободе: они сжимаются перспективой вместе
+  // с текстом. Диски крупнее шага сетки — без зазоров, случайный сдвиг убирает муар.
   const data = ctx.getImageData(0, 0, W, H).data;
   const mask = new Uint8Array(W * H);
   for (const r of regions)
     for (let y = Math.max(0, r.y); y < Math.min(H, r.y + r.h); y++) mask.fill(1, y * W + Math.max(0, r.x), y * W + Math.min(W, r.x + r.w));
 
-  // бумага — плоские сплаты на полу; текст и картинки — круглые точки: под острым углом
-  // плоский диск вытягивается в черту и строки превращаются в полосы, а сфера остаётся точкой
-  const xs: number[] = [], ys: number[] = [], hs: number[] = [], sg: number[] = [], cols: number[] = [], als: number[] = [], flats: boolean[] = [];
-  const push = (x: number, y: number, h: number, sigmaM: number, r: number, g: number, b: number, a: number, flat = false) => {
-    flats.push(flat);
-    // случайный сдвиг в пределах ячейки: регулярная сетка точек в перспективе даёт муар-полосы
-    const j = flat ? 0 : (sigmaM / sp.mpp) * 0.55;
+  const xs: number[] = [], ys: number[] = [], sg: number[] = [], cols: number[] = [], als: number[] = [];
+  const push = (x: number, y: number, sigmaM: number, r: number, g: number, b: number, a: number) => {
+    const j = (sigmaM / sp.mpp) * 0.5;
     xs.push(x + (Math.random() - 0.5) * j);
     ys.push(y + (Math.random() - 0.5) * j);
-    hs.push(h);
     sg.push(sigmaM);
     cols.push((r & 255) | ((g & 255) << 8) | ((b & 255) << 16));
     als.push(Math.max(0, Math.min(255, Math.round(a * 255))));
   };
-  const lum = (i: number) => (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+  // «чернила» на чёрном фоне — яркость или насыщенность пикселя
+  const inkAt = (i: number) =>
+    Math.max((0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255, (Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2])) / 255);
+  const full = (c: number, ink: number) => Math.max(0, Math.min(255, Math.round(c / Math.max(ink, 0.05))));
 
-  // paper
-  const ps = Math.max(4, Math.round(0.48 * P));
-  for (let y = ps / 2; y < H; y += ps) for (let x = ps / 2; x < W; x += ps) push(x, y, 0, 0.3, PAPER[0], PAPER[1], PAPER[2], 0.97, true);
-
-  // halftone regions: one dot per cell; size from coverage (mono) or a full colour mosaic (pictures)
+  // крупное — одна точка на ячейку, площадь точки ∝ заполненности
   for (const r of regions) {
     const k = r.stride;
     for (let y = r.y; y < r.y + r.h - k + 1; y += k)
@@ -363,43 +355,25 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
             R += data[i];
             G += data[i + 1];
             B += data[i + 2];
-            ink += 1 - lum(i) / 0.96;
+            ink += inkAt(i);
             n++;
           }
         if (!n) continue;
-        R /= n;
-        G /= n;
-        B /= n;
-        const cov = Math.max(0, Math.min(1, ink / n));
-        if (r.color) {
-          if (cov < 0.02) continue;
-          push(x + k / 2, y + k / 2, 0.03, 0.62 * k * sp.mpp, R, G, B, 1);
-        } else {
-          if (cov < 0.08) continue;
-          // pure ink colour, dot area ∝ coverage
-          const dark = Math.min(1, cov * 1.15);
-          push(x + k / 2, y + k / 2, 0.03, 0.5 * k * sp.mpp * Math.sqrt(dark), 0, 0, 0, 1);
-          // the averaged colour is diluted by paper; recover the ink colour
-          const j = cols.length - 1;
-          const inv = (c: number, p: number) => Math.max(0, Math.min(255, Math.round(p - (p - c) / Math.max(dark, 0.05))));
-          cols[j] = inv(R, PAPER[0]) | (inv(G, PAPER[1]) << 8) | (inv(B, PAPER[2]) << 16);
-        }
+        const cov = Math.min(1, ink / n);
+        if (cov < 0.08) continue;
+        push(x + k / 2, y + k / 2, 0.72 * k * sp.mpp * Math.sqrt(Math.min(1, cov * 1.15)), full(R / n, cov), full(G / n, cov), full(B / n, cov), 1);
       }
   }
 
-  // fine ink (body text, lines): every pixel with enough ink outside halftone regions
+  // текст и линии — точка на пиксель
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       const p = y * W + x;
       if (mask[p]) continue;
       const i = p * 4;
-      const l = lum(i);
-      const sat = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
-      const ink = Math.max(1 - l / 0.96, sat / 255);
+      const ink = inkAt(i);
       if (ink < 0.16) continue;
-      const a = Math.min(1, ink * 1.5);
-      const inv = (c: number, pp: number) => Math.max(0, Math.min(255, Math.round(pp - (pp - c) / Math.max(a, 0.05))));
-      push(x + 0.5, y + 0.5, 0.04, 0.72 * sp.mpp, inv(data[i], PAPER[0]), inv(data[i + 1], PAPER[1]), inv(data[i + 2], PAPER[2]), a);
+      push(x + 0.5, y + 0.5, 0.8 * sp.mpp, full(data[i], ink), full(data[i + 1], ink), full(data[i + 2], ink), Math.min(1, ink * 1.4));
     }
 
   // ---------- pack into the same layout as streamed chunks
@@ -415,29 +389,30 @@ export async function buildLanding(sp: PageSpec, story: StoryDef, imageBase: str
   const segBits = (sp.segId & 255) << 24;
   const q16 = (v: number, b: number, e: number) => Math.max(0, Math.min(65535, Math.round(((v - b) / e) * 65535)));
   for (let k = 0; k < n; k++) {
-    const s = sp.sTo - ys[k] * sp.mpp;
+    const s = sp.sTo - ys[k] * sp.mpp * A;
     const w = sp.wLeft + xs[k] * sp.mpp;
-    const h = hs[k];
-    const qx = q16(s, bmin[0], ext[0]), qy = q16(h, bmin[1], ext[1]), qz = q16(w, bmin[2], ext[2]);
+    const qx = q16(s, bmin[0], ext[0]), qy = q16(0.03, bmin[1], ext[1]), qz = q16(w, bmin[2], ext[2]);
     const r16 = (Math.random() * 65535) | 0;
     const j = k * 4;
     texA[j] = qx | (qy << 16);
     texA[j + 1] = qz | (r16 << 16);
     texA[j + 2] = (cols[k] | (als[k] << 24)) >>> 0;
     texA[j + 3] = 255 | (128 << 8) | (128 << 16) | (128 << 24); // identity rotation
-    const sgm = ls(sg[k]);
-    texB[k] = sgm | ((flats[k] ? flat : sgm) << 8) | (sgm << 16) | segBits;
+    // оси сплата: x — вдоль улицы (растянут анаморфозой), y — нормаль ленты (плоский), z — поперёк
+    texB[k] = ls(sg[k] * A) | (flat << 8) | (ls(sg[k]) << 16) | segBits;
     pos[k * 3] = bmin[0] + (qx / 65535) * ext[0];
     pos[k * 3 + 1] = bmin[1] + (qy / 65535) * ext[1];
     pos[k * 3 + 2] = bmin[2] + (qz / 65535) * ext[2];
     rank[k] = r16;
     alpha[k] = als[k];
   }
-  // уменьшенная копия страницы — ею красятся частицы улицы, слетевшиеся в ленту
+
+  // уменьшенная копия страницы — по ней частицы улицы, слетевшиеся на обод, решают, выжить ли
+  // (попали на букву — остаются и белеют, нет — гаснут)
   const tex = document.createElement('canvas');
-  const k = Math.max(1, Math.ceil(Math.max(W, H) / 2048));
-  tex.width = Math.max(1, Math.round(W / k));
-  tex.height = Math.max(1, Math.round(H / k));
+  const kk = Math.max(1, Math.ceil(Math.max(W, H) / 2048));
+  tex.width = Math.max(1, Math.round(W / kk));
+  tex.height = Math.max(1, Math.round(H / kk));
   tex.getContext('2d')!.drawImage(cv, 0, 0, tex.width, tex.height);
   return { chunk: { seg: sp.segId, tier: -2, count: n, texA, texB, pos, rank, alpha }, texture: tex };
 }

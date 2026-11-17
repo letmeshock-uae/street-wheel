@@ -14,7 +14,7 @@
         "Own cameras",
         "Driver fleet"
       ],
-      "short": "Own cameras and a driver fleet photograph every street."
+      "short": "Photo, video and scans from our own fleet, partners and city sources."
     },
     {
       "id": "gate",
@@ -22,7 +22,7 @@
       "start": -80,
       "body": "Not every frame is useful. The server rejects the frames we don't need and passes the rest on.",
       "widget": "gate",
-      "short": "The server keeps useful frames and rejects the rest."
+      "short": "Capped lens, blurred frames, a ride that saw only sky: filtered out."
     },
     {
       "id": "detect",
@@ -30,7 +30,7 @@
       "start": -38,
       "body": "In the frames that pass, we detect violations: damaged fences and street lights, illegal advertising, graffiti, holes in the road surface.",
       "widget": "detect",
-      "short": "Fences, street lights, illegal ads, graffiti, potholes."
+      "short": "Poles, signs, curbs, stops, people. Then: which pole is it, exactly?"
     },
     {
       "id": "registry",
@@ -38,7 +38,7 @@
       "start": 30,
       "body": "Every detection becomes a record in a database of assets, grouped by violation category.",
       "widget": "registry",
-      "short": "Every detection becomes a record, grouped by category."
+      "short": "Many frames make one look. Looks merge into objects with a lasting ID."
     },
     {
       "id": "case",
@@ -46,7 +46,7 @@
       "start": 78,
       "body": "From the registry we build a case: literally a narrative about what is wrong in the city, and where.",
       "widget": "case",
-      "short": "Records become a narrative of what is wrong, and where."
+      "short": "When looks agree, a change request is raised, with its evidence chain."
     },
     {
       "id": "refresh",
@@ -54,7 +54,7 @@
       "start": 108,
       "body": "City data is dynamic and changes every day. When a road gets repaired, it is no longer a problem. So the loop starts again.",
       "widget": "refresh",
-      "short": "The city changes daily. Fixed problems close, the loop restarts."
+      "short": "Every pass refines the delta. We keep when it changed and when we knew."
     }
   ],
   "markers": [
@@ -171,5 +171,20 @@
         -36.39
       ]
     }
-  ]
+  ],
+  "landing": {
+    "kicker": "CITY WORLD MODEL",
+    "headline": [
+      "The city,",
+      "as a loop."
+    ],
+    "sub": "Scattered frames become a continuously updated, verifiable model of the city.",
+    "principles": [
+      "Many frames, one look.",
+      "Not seeing it is not seeing it gone.",
+      "A resident report waits for a machine look.",
+      "A false \"gone\" costs more than a delay."
+    ],
+    "closing": "Back to the street."
+  }
 }

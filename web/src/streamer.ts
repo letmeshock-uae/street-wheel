@@ -139,11 +139,11 @@ export class Streamer {
       for (let k = 0; k <= 4; k++) {
         const x = s.s0 + ((s.s1 - s.s0) * k) / 4 - (k === 4 ? 1e-3 : 0);
         let d = densityAlong(x, sc, this.street, reveal).dens;
-        if (lap && lap.parity >= 0) {
+        if (lap && lap.parity >= 0 && lap.gate > 0.001) {
           // на круге-лендинге улица — только редкая пыль: детальные тиры там не нужны
           const u = lap.u + wrap(sc - sCams[0], L);
           const idx = Math.floor((u + wrap(x - sc, L)) / L);
-          if ((((idx % 2) + 2) % 2) === lap.parity) d = Math.min(d, lap.cap);
+          if ((((idx % 2) + 2) % 2) === lap.parity) d = d + (Math.min(d, lap.cap) - d) * lap.gate;
         }
         if (d > mx) mx = d;
       }

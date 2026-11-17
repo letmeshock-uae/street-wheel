@@ -30,14 +30,16 @@ export class Controls {
   private keys = new Set<string>();
 
   constructor(el: HTMLElement) {
-    el.addEventListener('wheel', this.onWheel, { passive: false });
+    // скролл и тач слушаем на всём окне: прогулка должна идти, даже когда курсор над панелью главы,
+    // шкалой или меткой. Исключение — элементы со своей прокруткой (панель настроек).
+    window.addEventListener('wheel', this.onWheel, { passive: false });
     el.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerUp);
-    el.addEventListener('touchstart', this.onTouchStart, { passive: false });
-    el.addEventListener('touchmove', this.onTouchMove, { passive: false });
-    el.addEventListener('touchend', this.onTouchEnd);
+    window.addEventListener('touchstart', this.onTouchStart, { passive: false });
+    window.addEventListener('touchmove', this.onTouchMove, { passive: false });
+    window.addEventListener('touchend', this.onTouchEnd);
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement)?.closest?.('input,textarea,[contenteditable]')) return;
       if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' ', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -73,7 +75,17 @@ export class Controls {
     this.interacted = true;
   }
 
+  /** внутри элемента, который сам умеет прокручиваться (панель настроек), — не мешаем */
+  private ownScroll(target: EventTarget | null, dy = 0): boolean {
+    const scroller = (target as HTMLElement | null)?.closest?.('[data-own-scroll]') as HTMLElement | null;
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return false;
+    if (dy < 0) return scroller.scrollTop > 0;
+    if (dy > 0) return scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1;
+    return true;
+  }
+
   private onWheel = (e: WheelEvent) => {
+    if (this.ownScroll(e.target, e.deltaY)) return;
     e.preventDefault();
     if (!this.enabled) return;
     let dy = e.deltaY;
@@ -109,7 +121,9 @@ export class Controls {
   };
 
   private onTouchStart = (e: TouchEvent) => {
-    if (e.touches.length !== 1) return;
+    if (e.touches.length !== 1 || this.ownScroll(e.target)) return;
+    // кнопки, ссылки и поля остаются кликабельными: тап по ним не начинает «прогулку»
+    if ((e.target as HTMLElement | null)?.closest?.('input,select,textarea')) return;
     const t = e.touches[0];
     this.touch = { x: t.clientX, y: t.clientY, t: performance.now(), vx: 0, vy: 0, axis: 'none' };
     this.inertia = 0;

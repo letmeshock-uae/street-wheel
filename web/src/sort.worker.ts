@@ -51,6 +51,7 @@ export interface LapParams {
   ribbonC: number; // центр ленты (w)
   ribbonHW: number; // полуширина ленты
   cap: number; // доля частиц улицы на круге-лендинге
+  gate: number; // 0..1: лента — финал рассказа, до него всё кольцо — город
 }
 
 export interface PickRequest {
@@ -115,7 +116,7 @@ function ensureLut() {
   }
 }
 
-const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04, morphRamp: 40, ribbonC: -8, ribbonHW: 18, cap: 0.3 };
+const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04, morphRamp: 40, ribbonC: -8, ribbonHW: 18, cap: 0.3, gate: 0 };
 
 function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams = NO_LAP) {
   const L = street.length;
@@ -134,12 +135,12 @@ function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams =
     const dens = densityAlong(s, sCam, street, r).dens;
     lutP[b] = densitySeamParticle(s, sCam, street, r);
     const lapIdx = Math.floor((lap.u + d) / L);
-    const landing = lap.parity >= 0 && ((lapIdx % 2) + 2) % 2 === lap.parity;
-    lutD[b] = landing ? Math.min(dens, lap.cap) : dens;
+    const landing = lap.parity >= 0 && lap.gate > 0.001 && ((lapIdx % 2) + 2) % 2 === lap.parity;
+    lutD[b] = landing ? dens + (Math.min(dens, lap.cap) - dens) * lap.gate : dens;
     const lapX = lap.u + d - lapIdx * L;
-    lutM[b] = landing ? smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX)) : 0;
+    lutM[b] = landing ? lap.gate * smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX)) : 0;
     const ad = Math.abs(d);
-    lutG[b] = landing ? Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 1.25))) : 0;
+    lutG[b] = landing ? lap.gate * Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 1.25))) : 0;
   }
 }
 

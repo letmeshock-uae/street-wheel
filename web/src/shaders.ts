@@ -23,7 +23,7 @@ uniform vec4 u_lat;     // latCenter, latInner, latOuter, latDensity
 uniform vec4 u_misc;    // scaleLogMin, scaleLogStep, dotWorld, clock (сек, для «прибытия» данных)
 uniform vec4 u_float;   // scatterBase, scatterPerM, driftNear, driftFar — «лимбо»
 uniform highp sampler2D u_birth; // время заливки каждой страницы пула (строки текстуры)
-uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, -, -
+uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, gate лендинга (0..1), -
 uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2L), чётность круга-лендинга (-1 — нет), pageNear, pageFloor
 uniform vec4 u_lap2;    // morphRamp (м), центр ленты (w), полуширина ленты, доля частиц улицы на круге-лендинге
 uniform vec4 u_pageRect;// sFrom, sTo, wLeft, width — где на ободе лежит страница
@@ -66,13 +66,15 @@ void main() {
   //  Каждый сплат рождается частицей у порога видимости и слетается на место по мере приближения.
   // на каком круге эта точка: на круге-лендинге видно полотно, на обычном — улица
   float lapIdx = floor((u_lap.x + d) / L);
-  bool landing = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5;
+  // gate: лента — финал рассказа; до глав 5–6 первого круга всё кольцо остаётся городом
+  float gate = u_motion.z;
+  bool landing = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5 && gate > 0.001;
 
   float dens, pf, densEm;
   if (isPage) {
     if (!landing) return;
     float rawP = pow(u_lap.z / max(ad, 1e-3), 1.25);
-    dens = max(u_lap.w, min(1.0, rawP));
+    dens = max(u_lap.w, min(1.0, rawP)) * gate;
     densEm = rawP;
     pf = smoothstep(u_lap.z * 1.5, u_lap.z * 3.0, ad);
   } else if (partOnly) {
@@ -91,7 +93,7 @@ void main() {
     dens = min(max(u_dens.z, min(1.0, raw)), lim);
     densEm = min(raw, lim); // без ограничения сверху: рядом всё гарантированно «собрано»
     pf = max(max(smoothstep(u_part.x, u_part.y, ad), sm), lt);
-    if (landing) dens = min(dens, u_lap2.w);
+    if (landing) dens = mix(dens, min(dens, u_lap2.w), gate);
   }
   float fade = 1.0 - smoothstep(dens * 0.82, dens, rank);
   if (fade <= 0.002) return;
@@ -100,8 +102,8 @@ void main() {
   // morph зависит от места точки внутри круга (от шва): за первые u_lap2.x метров улица
   // сплющивается к полу и сжимается по ширине, к концу круга — разворачивается обратно.
   float lapX = (u_lap.x + d) - lapIdx * L;
-  float morph = (landing && !isPage) ? smoothstep(0.0, u_lap2.x, lapX) * (1.0 - smoothstep(L - u_lap2.x, L, lapX)) : 0.0;
-  vec3 pageCol = vec3(0.965, 0.957, 0.937);
+  float morph = (landing && !isPage) ? gate * smoothstep(0.0, u_lap2.x, lapX) * (1.0 - smoothstep(L - u_lap2.x, L, lapX)) : 0.0;
+  vec3 pageCol = vec3(0.0); // вне страницы — темнота: частицы улицы там просто гаснут
   if (morph > 0.0) {
     float c = u_lap2.y, hw = u_lap2.z;
     float wR = c + hw * tanh(1.2 * (p.z - c) / 45.0) + (fract(p.y * 7.13) - 0.5) * 0.6;
@@ -161,8 +163,10 @@ void main() {
   vec2 ndc = clip.xy / clip.w;
 
   vec4 col = vec4(float(A.z & 255u), float((A.z >> 8u) & 255u), float((A.z >> 16u) & 255u), float(A.z >> 24u)) / 255.0;
-  col.rgb = mix(col.rgb, pageCol, morph);
-  col.a = mix(col.a, max(col.a, 0.9), morph);
+  // слетевшиеся на обод частицы улицы выживают только на буквах — и берут их цвет
+  float inkM = max(max(pageCol.r, pageCol.g), pageCol.b);
+  col.rgb = mix(col.rgb, pageCol / max(inkM, 0.05), morph);
+  col.a = mix(col.a, max(col.a, 0.9) * smoothstep(0.12, 0.45, inkM), morph);
   // вдали (pf) частицы подсвечены, чтобы читались как «звёзды»; летящие на место — лишь чуть ярче
   float alpha = mix(col.a, max(col.a, u_part.w), pf);
   alpha = mix(alpha, min(1.0, alpha * 2.0), 1.0 - em);
