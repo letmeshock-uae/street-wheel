@@ -571,3 +571,56 @@ body.clean #ui, body.clean #pois { display: none; }
 .story-rail::before { content: ''; position: absolute; inset: -18px -40px -14px -22px; z-index: -1; background: radial-gradient(closest-side, rgba(0, 0, 0, 0.45), transparent); pointer-events: none; }
 .tune-toggle { grid-template-columns: 1fr auto; cursor: pointer; }
 .tune-toggle input { grid-column: auto; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+
+/* ---- финал: обычная текстовая плашка, её двигает скролл колеса (см. finale.ts) */
+.finale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(640px, calc(100vw - 32px));
+  padding: 56px 56px 64px;
+  border-radius: 20px;
+  background: rgba(8, 8, 10, 0.86);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  pointer-events: none;
+  visibility: hidden;
+  will-change: transform;
+}
+.finale p { margin: 0 0 14px; font-size: 16px; line-height: 1.6; color: var(--fg-dim); }
+.fi-kicker { font-size: 11px !important; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent) !important; margin: 0 0 12px !important; }
+.fi-title { margin: 0 0 20px; font-size: 56px; font-weight: 650; line-height: 1.02; letter-spacing: -0.03em; }
+.finale .fi-lead { font-size: 19px; line-height: 1.5; color: var(--fg); }
+.fi-sec { margin-top: 52px; padding-top: 28px; border-top: 1px solid var(--line); }
+.finale h3 { margin: 0 0 18px; font-size: 30px; font-weight: 620; line-height: 1.1; letter-spacing: -0.02em; }
+.finale ol { list-style: none; margin: 0 0 22px; padding: 0; }
+.fi-steps li, .fi-principles li { display: grid; grid-template-columns: 44px 1fr; padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.fi-n { font-size: 13px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; padding-top: 4px; }
+.fi-steps b { font-size: 17px; font-weight: 600; }
+.finale .fi-steps p { margin: 3px 0 0; font-size: 15px; line-height: 1.5; }
+.finale .fi-muted { color: rgba(244, 241, 234, 0.45); font-size: 15px; }
+.finale .fi-id { margin: 4px 0 4px; font-size: 72px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; }
+.fi-episodes li { padding: 14px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.fi-when { display: block; font-size: 13px; color: var(--fg-dim); font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+.fi-verb { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.fi-verb.is-warn { color: var(--accent); }
+.fi-verb.is-gone { color: #ff6b57; }
+.fi-cause { margin-left: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg-dim); }
+.fi-cause.is-world { color: #7fe0a0; }
+.finale .fi-episodes p { margin: 4px 0 0; font-size: 15px; line-height: 1.5; }
+.finale .fi-big { margin-top: 26px; font-size: 24px; line-height: 1.3; font-weight: 600; color: var(--fg); }
+.fi-principles li { font-size: 22px; line-height: 1.3; font-weight: 600; }
+.fi-end { margin-top: 72px; }
+.finale .fi-loop { margin: 0 0 8px; font-size: 52px; font-weight: 650; line-height: 1.02; letter-spacing: -0.03em; color: var(--fg); }
+.finale .fi-back { margin: 0; font-size: 18px; font-weight: 600; color: var(--accent); }
+@media (max-width: 600px) {
+  .finale { padding: 30px 22px 36px; border-radius: 16px; }
+  .fi-title { font-size: 38px; }
+  .finale .fi-lead { font-size: 17px; }
+  .finale h3 { font-size: 24px; }
+  .finale .fi-id { font-size: 54px; }
+  .fi-principles li { font-size: 18px; }
+  .finale .fi-loop { font-size: 38px; }
+}

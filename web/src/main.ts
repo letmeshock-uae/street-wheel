@@ -11,7 +11,8 @@ import { Streamer } from './streamer';
 import type { SortIn, SortOut, SortRequest } from './sort.worker';
 import { loadSettings, TunePanel } from './tune';
 import { Story, type StoryDef } from './story';
-import { buildLanding, pageBounds, type PageSpec } from './landing';
+import { Finale } from './finale';
+import { FINALE_FLOAT } from './shaders';
 
 const params = new URLSearchParams(location.search);
 // ?data=имя_папки — A/B-сравнение разных сборок данных из public/
@@ -51,26 +52,15 @@ async function main() {
     status.textContent = 'Your browser does not support WebGL2, so the scene cannot be shown.';
     throw e;
   }
-  // ---- рассказ (story.json) и лендинг-полотно на каждом втором круге
+  // ---- рассказ (story.json) и финал на каждом втором круге
   let storyDef: StoryDef | null = null;
   try {
     storyDef = await (await fetch(import.meta.env.BASE_URL + 'story.json')).json();
   } catch (e) {
     console.warn('story.json', e);
   }
-  const pageSpec: PageSpec = {
-    sFrom: street.sMin + 25,
-    sTo: street.sMax - 42, // заканчиваем до того, как город начнёт возвращаться
-    width: 36,
-    wLeft: LOOK.lane - 18,
-    // разрешение текста: точка на 2.5 см — мелкие подписи остаются чёткими
-    mpp: q.name === 'low' ? 0.045 : q.name === 'mid' ? 0.032 : 0.025,
-    segId: manifest.segments.length + 1,
-    scaleLogMin: manifest.quant.scaleLogMin,
-    scaleLogMax: manifest.quant.scaleLogMax,
-  };
   const landingOn = !!storyDef && !params.has('nolanding');
-  renderer.setSegments(manifest, landingOn ? [{ id: pageSpec.segId, ...pageBounds(pageSpec), flag: 2 }] : []);
+  renderer.setSegments(manifest);
 
   // ---- воркер сортировки
   const sorter = new Worker(new URL('./sort.worker.ts', import.meta.url), { type: 'module' });
@@ -99,7 +89,7 @@ async function main() {
   };
 
   // ---- стартовая загрузка (редкие частицы всего кольца)
-  status.textContent = 'Assembling the street…';
+  status.textContent = 'Assembling the city…';
   await streamer.loadBase((f) => (bar.style.transform = `scaleX(${(0.1 + f * 0.9).toFixed(3)})`));
 
   const cam = new Camera();
@@ -134,24 +124,16 @@ async function main() {
     story.onOpenMarker = goToPoi;
     $('#hint')?.remove();
   }
-  // какой круг лендинговый: стартовый круг — всегда улица
+  // какой круг — финал: стартовый круг всегда улица, финал — каждый второй
   const lapOf = (sAbs: number) => Math.floor(((((sAbs - street.sMax) % (2 * L)) + 2 * L) % (2 * L)) / L);
   const landingParity = landingOn ? 1 - lapOf(controls.s) : -1;
-  // ?landing — сразу на круг-лендинг, чуть перед началом полотна
-  if (landingOn && params.has('landing')) controls.s = controls.sTarget = pageSpec.sFrom - 6 + L;
-  if (landingOn) {
-    // полотно строится, пока человек идёт первый круг
-    setTimeout(async () => {
-      try {
-        const { chunk, texture } = await buildLanding(pageSpec, storyDef!);
-        renderer.setPageTexture(texture);
-        const pb = pageBounds(pageSpec);
-        streamer.addPage(chunk, pb.bmin[0], pb.bmin[0] + pb.ext[0]);
-      } catch (e) {
-        console.warn('landing', e);
-      }
-    }, 2500);
-  }
+  // ?landing — сразу на круг-финал, сразу за швом
+  if (landingOn && params.has('landing')) controls.s = controls.sTarget = street.sMax + 4 + landingParity * L;
+  // финал: текстовая плашка поверх рассыпанного в частицы города.
+  // FIN_RAMP — за сколько метров после шва город рассыпается (и перед швом — собирается);
+  // плашка въезжает на FIN_A метрах круга и уходит вверх к FIN_B, когда город уже собирается
+  const FIN_RAMP = 40, FIN_A = 16, FIN_B = L - 24;
+  const finale = landingOn ? new Finale(ui) : null;
 
   // любая правка в панели → пересортировка с новыми параметрами
   let tuneVersion = 0;
@@ -202,10 +184,9 @@ async function main() {
   const INTRO_DELAY = 0.6, INTRO_DUR = 5.5;
   let clock = 0;
   let animClock = 0;
-  let landingBlend = 0;
-  // лента — финал: на круге-улице она начинает собираться, когда человек доходит до конца рассказа
+  // финал открывается к концу рассказа на круге-улице и держится весь следующий круг
   let landingGate = 0;
-  // полотно открывается только после того, как человек прошёл все шесть глав (?landing — сразу)
+  // только после того, как человек прошёл все шесть глав (?landing — сразу)
   const visited = new Set<number>();
   let visitedAll = params.has('landing');
   const finaleFrom = (storyDef ? [...storyDef.chapters].sort((a, b) => a.start - b.start).at(-1)?.start ?? street.sMax - 40 : street.sMax - 40) - street.sMin; // время анимации парения (скорость регулируется, при reduced motion стоит)
@@ -214,12 +195,8 @@ async function main() {
   const lapParams = () => ({
     u: ((((controls.s - street.sMax) % (2 * L)) + 2 * L) % (2 * L)),
     parity: landingParity,
-    pageNear: 60 * Math.max(0.75, profile.radius * adaptive.detail),
-    pageFloor: 0.03,
-    morphRamp: 40,
-    ribbonC: LOOK.lane,
-    ribbonHW: pageSpec.width / 2,
-    cap: 0.3,
+    ramp: FIN_RAMP,
+    cap: 0.1, // от города на финале остаётся одна десятая точек
     gate: landingGate,
   });
 
@@ -271,7 +248,10 @@ async function main() {
       tanX: cam.tanX * 1.18,
       tanY: cam.tanY * 1.18,
       // парящие точки сдвинуты шейдером с настоящих мест — расширяем отсечение на величину сдвига
-      pad: [2 + S.scatterBase + (reduceMotion ? 0 : S.driftFar + S.driftNear), S.scatterPerM],
+      pad: [
+        2 + S.scatterBase + (reduceMotion ? 0 : S.driftFar + S.driftNear) + (landingGate > 0 ? FINALE_FLOAT.scatter + FINALE_FLOAT.drift : 0),
+        S.scatterPerM + (landingGate > 0 ? FINALE_FLOAT.perM : 0),
+      ],
       lap: lapParams(),
       reveal,
       maxSorted: profile.maxSorted,
@@ -279,6 +259,19 @@ async function main() {
     sorter.postMessage(req);
   };
 
+  // история начинается с города: пока улица собирается и сворачивается в колесо, интерфейса нет
+  const uiEls = ['.story', '.wheel-hud', '.tune-btn'].map((sel) => document.querySelector(sel) as HTMLElement | null).filter(Boolean) as HTMLElement[];
+  let uiShown = -1;
+  const setUi = (a: number) => {
+    if (Math.abs(a - uiShown) < 0.004) return;
+    uiShown = a;
+    for (const el of uiEls) {
+      el.style.opacity = a.toFixed(3);
+      el.style.visibility = a < 0.01 ? 'hidden' : '';
+    }
+  };
+  let uiClock = 0; // секунды после того, как колесо сложилось
+  setUi(0);
   loader.classList.add('done');
   setTimeout(() => loader.remove(), 1200);
   const hint = $('#hint');
@@ -301,9 +294,7 @@ async function main() {
     // «лимбо»: базовый разлёт несобранной частицы (м), + м на метр расстояния, парение рядом / вдали (м)
     float: [0, 0, 0, 0],
     motion: [1, 0.25, 0, 0],
-    lap: [0, -1, 30, 0.05],
-    lap2: [40, LOOK.lane, 18, 0.3],
-    pageRect: [pageSpec.sFrom, pageSpec.sTo, pageSpec.wLeft, pageSpec.width],
+    lap: [0, -1, FIN_RAMP, 0.1],
   };
 
   const frame = (now: number) => {
@@ -326,21 +317,30 @@ async function main() {
       globalAlpha = 1;
       controls.basePitch = S.pitch;
     }
+    const onLanding = landingParity >= 0 && lapOf(controls.s) === landingParity;
+    const camX = ((((controls.s - street.sMax) % L) + L) % L); // место камеры внутри круга, от шва
     {
-      const onLanding = landingParity >= 0 && lapOf(controls.s) === landingParity;
-      const camX = ((((controls.s - street.sMax) % L) + L) % L); // место камеры внутри круга, от шва
       const target = landingParity < 0 || !visitedAll ? 0 : onLanding ? 1 : smoothstep(finaleFrom, finaleFrom + 28, camX);
       landingGate += (target - landingGate) * Math.min(1, dt * 2.5);
       if (Math.abs(target - landingGate) < 1e-3) landingGate = target;
     }
-    // на круге-лендинге взгляд чуть выше: в кадре поднимающееся полотно
-    landingBlend += ((landingParity >= 0 && lapOf(controls.s) === landingParity ? 1 : 0) - landingBlend) * Math.min(1, dt * 1.2);
-    controls.basePitch += 0.06 * landingBlend; // панели стоят вертикально — смотрим почти прямо
+    // плашка финала едет вместе со скроллом; пока она на экране, колесо и палец двигают её 1:1,
+    // как обычную страницу (а камера при этом летит сквозь частицы)
+    if (finale) {
+      const on = onLanding && landingGate > 0.001;
+      finale.update(on ? (camX - FIN_A) / (FIN_B - FIN_A) : -1, landingGate);
+      controls.pxMetres = (FIN_B - FIN_A) / Math.max(1, finale.travel);
+      controls.pxBlend = on ? landingGate * smoothstep(FIN_A - 12, FIN_A, camX) * (1 - smoothstep(FIN_B, FIN_B + 12, camX)) : 0;
+    }
     controls.wheelGain = S.wheelGain;
     controls.smoothing = S.smoothing;
     controls.invert = S.invertScroll > 0.5;
     cam.eye[1] = S.eye;
     cam.fovY = (S.fov * Math.PI) / 180;
+
+    // интерфейс и рассказ проявляются, только когда город собрался в колесо
+    if (introT >= 1) uiClock += dt;
+    setUi(smoothstep(0.4, 2.0, uiClock));
 
     controls.update(dt);
     if (controls.interacted && hint && !hint.classList.contains('gone')) hint.classList.add('gone');
@@ -381,13 +381,12 @@ async function main() {
     uni.float = [S.scatterBase, S.scatterPerM, reduceMotion ? 0 : S.driftNear, reduceMotion ? 0 : S.driftFar];
     uni.motion = [1.45 / Math.max(0.05, S.arrive), S.emBand, landingGate, 0];
     const lp = lapParams();
-    uni.lap = [lp.u, lp.parity, lp.pageNear, lp.pageFloor];
-    uni.lap2 = [lp.morphRamp, lp.ribbonC, lp.ribbonHW, lp.cap];
+    uni.lap = [lp.u, lp.parity, lp.ramp, lp.cap];
     uni.lat = [reveal.latCenter, reveal.latInner, reveal.latOuter, reveal.latDensity];
     renderer.render(uni, LOOK.bg);
 
-    // рассказ привязан к позиции на кольце; на круге-лендинге его ведёт само полотно
-    // круг считается лендингом, только если полотно на нём действительно показано
+    // рассказ привязан к позиции на кольце; на круге-финале главы молчат — говорит плашка
+    // (круг считается финалом, только если финал на нём действительно открыт)
     const streetLap = landingParity < 0 || lapOf(controls.s) !== landingParity || landingGate < 0.5;
     const st = story?.update(sCam, controls.s, streetLap, dt, clock);
     if (st && streetLap && st.chapterAlpha[st.active] > 0.5) {
@@ -411,7 +410,7 @@ async function main() {
         loaded: `${(ss.loadedSplats / 1e6).toFixed(2)}M in ${ss.loadedChunks} chunks, ${ss.inflight} loading`,
         pool: `${(ss.poolUsed * 100).toFixed(0)}% of ${(renderer.capacity / 1e6).toFixed(1)}M`,
         network: `${(ss.bytes / 1e6).toFixed(1)} MB`,
-        lap: streetLap ? 'street' : 'landing',
+        lap: streetLap ? 'street' : 'finale',
         sort: `${sortStats.ms.toFixed(0)} ms`,
         scale: `${adaptive.renderScale.toFixed(2)} res, ${adaptive.detail.toFixed(2)} detail, dpr ${dpr.toFixed(2)}`,
         s: `${sCam.toFixed(1)} (d to seam ${Math.abs(wrap(sCam - street.sMax, L)).toFixed(0)} m)`,

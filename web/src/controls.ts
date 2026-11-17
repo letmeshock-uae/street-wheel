@@ -19,6 +19,15 @@ export class Controls {
   smoothing = 4.5;
   /** инверсия направления скролла и свайпа */
   invert = false;
+  /**
+   * Свой масштаб «метров на пиксель» для колеса и свайпа (финал: текстовая плашка едет 1:1 с пальцем
+   * и колесом, как обычная страница). pxBlend 0 — обычные значения, 1 — pxMetres.
+   */
+  pxMetres = 0;
+  pxBlend = 0;
+  private gain(base: number) {
+    return base + (this.pxMetres - base) * this.pxBlend;
+  }
 
   private lookX = 0; // −1..1 позиция мыши
   private lookY = 0;
@@ -93,7 +102,7 @@ export class Controls {
     let dy = e.deltaY;
     if (e.deltaMode === 1) dy *= 16;
     else if (e.deltaMode === 2) dy *= window.innerHeight;
-    this.nudge(dy * this.wheelGain * (this.invert ? -1 : 1));
+    this.nudge(dy * this.gain(this.wheelGain) * (this.invert ? -1 : 1));
   };
 
   private onPointerDown = (e: PointerEvent) => {
@@ -141,7 +150,7 @@ export class Controls {
     const dy = t.clientY - this.touch.y;
     if (this.touch.axis === 'none' && Math.hypot(dx, dy) > 6) this.touch.axis = Math.abs(dy) >= Math.abs(dx) ? 'walk' : 'look';
     if (this.touch.axis === 'walk') {
-      const m = -dy * 0.07 * (this.invert ? -1 : 1);
+      const m = -dy * this.gain(0.07) * (this.invert ? -1 : 1);
       this.nudge(m);
       this.touch.vy = 0.7 * this.touch.vy + 0.3 * (m / dt);
     } else if (this.touch.axis === 'look') {

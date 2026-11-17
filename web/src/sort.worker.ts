@@ -12,7 +12,6 @@ interface WChunk {
   id: number;
   seg: number;
   partOnly: boolean;
-  page: boolean;
   n: number;
   pos: Float32Array;
   rank: Uint16Array;
@@ -41,17 +40,19 @@ export interface SortRequest {
   lap: LapParams;
 }
 
-/** круги: на круге-лендинге видно полотно, улица — редкая пыль */
+/** круги: на круге-финале город рассыпан в редкие абстрактные частицы */
 export interface LapParams {
   u: number; // позиция камеры за швом, mod 2L
-  parity: number; // чётность круга-лендинга, -1 — лендинга нет
-  pageNear: number;
-  pageFloor: number;
-  morphRamp: number; // за сколько метров после шва улица стекает в ленту
-  ribbonC: number; // центр ленты (w)
-  ribbonHW: number; // полуширина ленты
-  cap: number; // доля частиц улицы на круге-лендинге
-  gate: number; // 0..1: лента — финал рассказа, до него всё кольцо — город
+  parity: number; // чётность круга-финала, -1 — финала нет
+  ramp: number; // за сколько метров после шва город рассыпается (и до шва — собирается)
+  cap: number; // доля частиц города на круге-финале
+  gate: number; // 0..1: финал открывается после всех глав, до него всё кольцо — город
+}
+
+/** насколько рассыпан город в точке lapX своего круга (0 — город, 1 — частицы); то же, что dis в шейдере */
+export function dissolveAt(lap: LapParams, lapIdx: number, lapX: number, L: number): number {
+  if (lap.parity < 0 || lap.gate <= 0.001 || ((lapIdx % 2) + 2) % 2 !== lap.parity) return 0;
+  return lap.gate * smoothstep(0, lap.ramp, lapX) * (1 - smoothstep(L - lap.ramp, L, lapX));
 }
 
 export interface PickRequest {
@@ -72,7 +73,6 @@ export type SortIn =
       id: number;
       seg: number;
       partOnly: boolean;
-      page?: boolean;
       pos: Float32Array;
       rank: Uint16Array;
       alpha: Uint8Array;
@@ -94,8 +94,7 @@ const BIN = 0.05;
 let street: Street = { sMin: 0, sMax: 1, length: 1 };
 const chunks = new Map<number, WChunk>();
 let nb = 1;
-let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA, lutG = lutA, lutM = lutA;
-let lapNow: LapParams | null = null;
+let lutA = new Float32Array(1), lutB = lutA, lutS = lutA, lutC = lutA, lutD = lutA, lutP = lutA;
 let depth = new Float32Array(0);
 let idx = new Uint32Array(0);
 let keys = new Uint16Array(0);
@@ -111,16 +110,13 @@ function ensureLut() {
     lutC = new Float32Array(nb);
     lutD = new Float32Array(nb);
     lutP = new Float32Array(nb);
-    lutG = new Float32Array(nb);
-    lutM = new Float32Array(nb);
   }
 }
 
-const NO_LAP: LapParams = { u: 0, parity: -1, pageNear: 30, pageFloor: 0.04, morphRamp: 40, ribbonC: -8, ribbonHW: 18, cap: 0.3, gate: 0 };
+const NO_LAP: LapParams = { u: 0, parity: -1, ramp: 40, cap: 0.1, gate: 0 };
 
 function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams = NO_LAP) {
   const L = street.length;
-  lapNow = lap;
   for (let b = 0; b < nb; b++) {
     const s = street.sMin + (b + 0.5) * BIN;
     const d = wrap(s - sCam, L);
@@ -135,15 +131,8 @@ function buildLut(sCam: number, kappa: number, r: RevealParams, lap: LapParams =
     const dens = densityAlong(s, sCam, street, r).dens;
     lutP[b] = densitySeamParticle(s, sCam, street, r);
     const lapIdx = Math.floor((lap.u + d) / L);
-    const landing = lap.parity >= 0 && lap.gate > 0.001 && ((lapIdx % 2) + 2) % 2 === lap.parity;
-    const lapX = lap.u + d - lapIdx * L;
-    const ramp = smoothstep(0, lap.morphRamp, lapX) * (1 - smoothstep(L - lap.morphRamp, L, lapX));
-    const cityLeft = landing ? 1 - lap.gate * smoothstep(0.85, 1, ramp) : 1;
-    lutD[b] = landing ? (dens + (Math.min(dens, lap.cap) - dens) * lap.gate) * cityLeft : dens;
-    if (landing) lutP[b] *= cityLeft;
-    lutM[b] = landing ? lap.gate * ramp : 0;
-    const ad = Math.abs(d);
-    lutG[b] = landing ? lap.gate * Math.max(lap.pageFloor, Math.min(1, Math.pow(lap.pageNear / Math.max(ad, 1e-3), 2.2))) : 0;
+    const dis = dissolveAt(lap, lapIdx, lap.u + d - lapIdx * L, L);
+    lutD[b] = dens + (Math.min(dens, lap.cap) - dens) * dis;
   }
 }
 
@@ -186,12 +175,7 @@ function sort(req: SortRequest) {
 
   for (const c of chunks.values()) {
     let maxDens: number;
-    if (c.page) {
-      maxDens = 0;
-      const b0 = binOf(c.s0), b1 = binOf(c.s1 - 1e-3);
-      const span = (((b1 - b0) % nb) + nb) % nb;
-      for (let k = 0, b = b0; k <= span; k++, b = (b + 1) % nb) if (lutG[b] > maxDens) maxDens = lutG[b];
-    } else if (c.partOnly) {
+    if (c.partOnly) {
       maxDens = 0;
       for (let b = 0; b < nb; b += 8) if (lutP[b] > maxDens) maxDens = lutP[b];
     } else {
@@ -201,8 +185,8 @@ function sort(req: SortRequest) {
     }
     if (c.rankMin > maxDens + margin) continue;
     candidates += c.n;
-    const lut = c.page ? lutG : c.partOnly ? lutP : lutD;
-    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly || c.page;
+    const lut = c.partOnly ? lutP : lutD;
+    const pos = c.pos, rank = c.rank, pages = c.pages, n = c.n, partOnly = c.partOnly;
     for (let i = 0; i < n; i++) {
       const i3 = i * 3;
       const s = pos[i3], h = pos[i3 + 1], w = pos[i3 + 2];
@@ -217,21 +201,9 @@ function sort(req: SortRequest) {
         }
       }
       if (rank[i] > (dens + margin) * 65535) continue;
-      let hh = h, ww = w;
-      const mo = c.page ? 0 : lutM[b];
-      if (mo > 0) {
-        // тот же морф «улица → лента», что и в шейдере, — сортируем по новым позициям
-        const L2 = lapNow!;
-        const fr = (x: number) => x - Math.floor(x);
-        const wR = L2.ribbonC + L2.ribbonHW * Math.tanh((1.2 * (w - L2.ribbonC)) / 45) + (fr(h * 7.13) - 0.5) * 0.6;
-        const hR = 0.004 + fr(w * 3.7) * 0.008;
-        const lift = Math.sin(mo * Math.PI) * 2 * fr(s * 13.17 + w * 3.1);
-        hh = h + (hR - h) * mo + lift;
-        ww = w + (wR - w) * mo;
-      }
-      const vx = lutA[b] - hh * lutS[b] - ex;
-      const vy = lutB[b] + hh * lutC[b] - ey;
-      const vz = ww - ez;
+      const vx = lutA[b] - h * lutS[b] - ex;
+      const vy = lutB[b] + h * lutC[b] - ey;
+      const vz = w - ez;
       const dz = fx * vx + fy * vy + fz * vz;
       if (dz < 0.12) continue;
       const pad = padA + padB * dz;
@@ -285,7 +257,7 @@ function pick(req: PickRequest) {
   // так же, как глаз видит поверхность из множества полупрозрачных сплатов
   const hits: { t: number; a: number; s: number; h: number; w: number }[] = [];
   for (const c of chunks.values()) {
-    if (c.partOnly || c.page) continue;
+    if (c.partOnly) continue;
     const pos = c.pos, rank = c.rank, alpha = c.alpha, n = c.n;
     for (let i = 0; i < n; i++) {
       if (alpha[i] < 5) continue;
@@ -332,7 +304,6 @@ self.onmessage = (e: MessageEvent<SortIn>) => {
         id: m.id,
         seg: m.seg,
         partOnly: m.partOnly,
-        page: !!m.page,
         n: m.rank.length,
         pos: m.pos,
         rank: m.rank,

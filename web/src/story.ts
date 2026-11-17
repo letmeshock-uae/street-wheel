@@ -31,7 +31,6 @@ export interface StoryDef {
   chapters: Chapter[];
   markers: StoryMarker[];
   /** текст финального полотна (круг-лендинг) */
-  landing?: { kicker?: string; headline?: string[]; sub?: string; principles?: string[]; closing?: string };
 }
 
 export interface StoryState {
@@ -261,7 +260,7 @@ export class Story {
 
   /**
    * sCam — ring coordinate of the camera, sAbs — unbounded position (to know how far the user has walked),
-   * streetLap — false on the "landing" lap, where the page itself tells the story.
+   * streetLap — false on the finale lap, where the text panel tells the story.
    */
   update(sCam: number, sAbs: number, streetLap: boolean, dt: number, clock: number): StoryState {
     if (this.startAbs === null) this.startAbs = sAbs;
@@ -312,7 +311,7 @@ export class Story {
       (seg.firstElementChild!.firstElementChild as HTMLElement).style.transform = `scaleX(${fill.toFixed(3)})`;
       seg.classList.toggle('is-active', streetLap && i === active);
     });
-    this.railLabel.textContent = streetLap ? this.chapters[active].title : 'Overview';
+    this.railLabel.textContent = streetLap ? this.chapters[active].title : 'Inside the loop';
     this.rail.style.opacity = (1 - heroA * 0.85).toFixed(3);
 
     // viewfinder belongs to "Capture"

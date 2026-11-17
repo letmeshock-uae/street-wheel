@@ -1,5 +1,8 @@
 // GLSL. Математика изгиба и «проявления» должна совпадать с ring.ts / sort.worker.ts.
 
+/** финал: разлёт (м + м на метр дали) и парение (м) рассыпанного города — сортировщик расширяет на них отсечение */
+export const FINALE_FLOAT = { scatter: 2.5, perM: 0.05, drift: 0.9 };
+
 export const SPLAT_VS = /* glsl */ `#version 300 es
 precision highp float;
 precision highp int;
@@ -23,11 +26,12 @@ uniform vec4 u_lat;     // latCenter, latInner, latOuter, latDensity
 uniform vec4 u_misc;    // scaleLogMin, scaleLogStep, dotWorld, clock (сек, для «прибытия» данных)
 uniform vec4 u_float;   // scatterBase, scatterPerM, driftNear, driftFar — «лимбо»
 uniform highp sampler2D u_birth; // время заливки каждой страницы пула (строки текстуры)
-uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, gate лендинга (0..1), -
-uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2L), чётность круга-лендинга (-1 — нет), pageNear, pageFloor
-uniform vec4 u_lap2;    // morphRamp (м), центр ленты (w), полуширина ленты, доля частиц улицы на круге-лендинге
-uniform vec4 u_pageRect;// sFrom, sTo, wLeft, width — где на ободе лежит страница
-uniform sampler2D u_page; // страница лендинга (для окраски частиц, слетевшихся в ленту)
+uniform vec4 u_motion;  // скорость прилёта (1/с), доля «собирающихся» у порога, gate финала (0..1), -
+uniform vec4 u_lap;     // lapU (позиция камеры за швом mod 2L), чётность круга-финала (-1 — нет), переход (м), доля частиц на финале
+
+const float FIN_SCATTER = ${FINALE_FLOAT.scatter.toFixed(3)};
+const float FIN_SCATTER_PER_M = ${FINALE_FLOAT.perM.toFixed(3)};
+const float FIN_DRIFT = ${FINALE_FLOAT.drift.toFixed(3)};
 
 layout(location = 0) in uint a_index;
 
@@ -53,8 +57,7 @@ void main() {
   vec4 se = texelFetch(u_seg, ivec2(seg * 2 + 1, 0), 0);
   vec3 p = sb.xyz + vec3(float(A.x & 0xffffu), float(A.x >> 16u), float(A.y & 0xffffu)) * (se.xyz / 65535.0);
   float rank = float(A.y >> 16u) / 65535.0;
-  bool partOnly = sb.w > 0.5 && sb.w < 1.5; // частицы шва
-  bool isPage = sb.w > 1.5;                  // лендинг-полотно
+  bool partOnly = sb.w > 0.5; // частицы шва
 
   float sCam = u_ring.x, kappa = u_ring.y, L = u_ring.z, sMin = u_ring.w, sMax = u_ring2.x;
   float d = wrapd(p.x - sCam, L);
@@ -64,30 +67,21 @@ void main() {
   //  dens — доля видимых сплатов (по рангу); pf — насколько сплат сжат в точку (по расстоянию);
   //  em   — насколько сплат «собрался» на своём месте: 0 — парит частицей в воздухе, 1 — на месте.
   //  Каждый сплат рождается частицей у порога видимости и слетается на место по мере приближения.
-  // на каком круге эта точка: на круге-лендинге видно полотно, на обычном — улица
+  // круг-финал: город рассыпается в абстрактные частицы, поверх них прокручивается текст финала.
+  // dis — насколько точка «рассыпана»: за u_lap.z метров после шва улица растворяется,
+  // к концу круга собирается обратно. gate: финал открывается только после всех глав.
   float lapIdx = floor((u_lap.x + d) / L);
-  // gate: лента — финал рассказа; до глав 5–6 первого круга всё кольцо остаётся городом
   float gate = u_motion.z;
-  bool landing = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5 && gate > 0.001;
-  // где точка внутри своего круга (от шва) и насколько она в зоне «улица → лента»
+  bool finale = abs(mod(lapIdx, 2.0) - u_lap.y) < 0.5 && gate > 0.001;
   float lapX = (u_lap.x + d) - lapIdx * L;
-  float ramp = smoothstep(0.0, u_lap2.x, lapX) * (1.0 - smoothstep(L - u_lap2.x, L, lapX));
-  // частицы города нужны только в самом переходе: долетели до букв — гаснут, дальше текст держат свои точки
-  float cityLeft = landing ? 1.0 - gate * smoothstep(0.85, 1.0, ramp) : 1.0;
+  float dis = finale ? gate * smoothstep(0.0, u_lap.z, lapX) * (1.0 - smoothstep(L - u_lap.z, L, lapX)) : 0.0;
 
   float dens, pf, densEm;
-  if (isPage) {
-    if (!landing) return;
-    // текст полотна собран целиком далеко вперёд и не сжимается в «звёздочки» — чтобы читались мелкие буквы
-    float rawP = pow(u_lap.z / max(ad, 1e-3), 2.2); // в зоне чтения — все точки, дальше — редкая пыль
-    dens = max(u_lap.w, min(1.0, rawP)) * gate;
-    densEm = rawP;
-    pf = 0.0;
-  } else if (partOnly) {
+  if (partOnly) {
     float t = smoothstep(u_part.x * 0.5, u_dens.y, ad);
     dens = mix(u_seamP.x, u_seamP.y, t);
     float e = abs(wrapd(p.x - sMax, L));
-    dens *= (1.0 - smoothstep(u_ring2.y * 0.75, u_ring2.y + 4.0, e)) * cityLeft;
+    dens *= 1.0 - smoothstep(u_ring2.y * 0.75, u_ring2.y + 4.0, e);
     densEm = -1.0;
     pf = 1.0;
   } else {
@@ -99,7 +93,8 @@ void main() {
     dens = min(max(u_dens.z, min(1.0, raw)), lim);
     densEm = min(raw, lim); // без ограничения сверху: рядом всё гарантированно «собрано»
     pf = max(max(smoothstep(u_part.x, u_part.y, ad), sm), lt);
-    if (landing) dens = mix(dens, min(dens, u_lap2.w), gate) * cityLeft;
+    dens = mix(dens, min(dens, u_lap.w), dis);
+    pf = max(pf, dis);
   }
   float fade = 1.0 - smoothstep(dens * 0.82, dens, rank);
   if (fade <= 0.002) return;
@@ -115,44 +110,12 @@ void main() {
   float arrive = clamp((u_misc.w - birth) * u_motion.x - rnd * 0.45, 0.0, 1.0);
   arrive = arrive * arrive * (3.0 - 2.0 * arrive);
 
-  // ---- панели финала «пишутся» по мере приближения в порядке чтения (порядок лежит в A.w):
-  // пока очередь элемента не пришла, его частицы — облачко пыли в плоскости панели;
-  // когда человек проходит сквозь панель, она снова рассыпается.
-  float pageEm = 1.0;
-  if (isPage) {
-    float order = float(A.w & 0xffffu) / 65535.0;
-    float P = 1.0 - smoothstep(u_lap.z * 0.3, u_lap.z * 1.25, ad);
-    float rev = smoothstep(order - 0.03, order + 0.08, P * 1.1);
-    pageEm = rev * smoothstep(4.0, 12.0, ad);
-    // ещё не «написанное» — редкая пыль: видна лишь малая часть частиц, остальные появляются при сборке
-    if (rnd3 > mix(0.1, 1.0, smoothstep(0.0, 0.6, pageEm))) return;
-    float S = (1.0 - pageEm) * (1.5 + ad * 0.035);
-    p += vec3((rnd - 0.5) * 0.6, (rnd2 - 0.5) * 2.0 + 0.5, (rnd3 - 0.5) * 2.0) * S;
-  }
-
-  // ---- круг-лендинг: сама улица «стекает» в белую ленту на ободе колеса.
-  // morph зависит от места точки внутри круга (от шва): за первые u_lap2.x метров улица
-  // сплющивается к полу и сжимается по ширине, к концу круга — разворачивается обратно.
-  float morph = (landing && !isPage) ? gate * ramp : 0.0;
-  vec3 pageCol = vec3(0.0); // вне страницы — темнота: частицы улицы там просто гаснут
-  if (morph > 0.0) {
-    float c = u_lap2.y, hw = u_lap2.z;
-    float wR = c + hw * tanh(1.2 * (p.z - c) / 45.0) + (fract(p.y * 7.13) - 0.5) * 0.6;
-    float hR = 0.004 + fract(p.z * 3.7) * 0.008; // ниже точек текста — не перекрывают буквы
-    float lift = sin(morph * 3.14159) * 2.0 * fract(p.x * 13.17 + p.z * 3.1); // летят дугой
-    vec2 uv = vec2((wR - u_pageRect.z) / u_pageRect.w, (u_pageRect.y - p.x) / (u_pageRect.y - u_pageRect.x));
-    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) pageCol = texture(u_page, uv).rgb;
-    p.y = mix(p.y, hR, morph) + lift;
-    p.z = mix(p.z, wR, morph);
-  }
-
   // «собираются» только самые новые сплаты на данной дистанции (доля u_motion.y) — у порога видимости
-  // полотно должно читаться: у него узкая полоса «сборки» и слабый разлёт
-  float band = isPage ? 0.08 : u_motion.y;
-  float em = isPage ? pageEm * arrive : (densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
+  float band = u_motion.y;
+  float em = (densEm < -1.5 ? 0.0 : densEm < 0.0 ? 0.45 : 1.0 - smoothstep(densEm * (1.0 - band), densEm, rank)) * arrive;
   fade *= min(1.0, arrive * 4.0);
-  em = max(em, morph); // слетевшиеся в ленту не разлетаются
-  float pfE = max(max(pf, 1.0 - em), morph);
+  em *= 1.0 - dis; // на финале ничего не «собрано»: всё парит частицами
+  float pfE = max(pf, 1.0 - em);
 
   // ---- изгиб улицы в колесо
   float th = kappa * d;
@@ -167,9 +130,9 @@ void main() {
   // ---- «лимбо»: несобранные частицы смещены со своих мест и медленно парят; вдали — сильнее
   vec3 rdir = vec3(rnd, rnd2, rnd3) * 2.0 - 1.0;
   float farT = smoothstep(u_part.y * 0.4, u_part.y * 2.2, ad); // ~25 м → ~140 м: средний план читается, дальний парит
-  float pageK = isPage ? 0.15 : 1.0;
-  float scatter = isPage ? 0.0 : (1.0 - em) * (u_float.x + ad * u_float.y); // у панелей разлёт уже задан в их плоскости
-  float drift = (u_float.z * pfE + u_float.w * farT) * pageK;
+  // на финале форма улицы расплывается в облако, и оно заметно плывёт
+  float scatter = (1.0 - em) * (u_float.x + ad * u_float.y) + dis * (FIN_SCATTER + ad * FIN_SCATTER_PER_M);
+  float drift = u_float.z * pfE + u_float.w * farT + dis * FIN_DRIFT;
   vec3 wob = vec3(
     sin(time * (0.23 + 0.17 * rnd) + rnd2 * 6.2831 + W.x * 0.07),
     sin(time * (0.19 + 0.15 * rnd2) + rnd3 * 6.2831 + W.z * 0.09),
@@ -183,16 +146,14 @@ void main() {
   vec2 ndc = clip.xy / clip.w;
 
   vec4 col = vec4(float(A.z & 255u), float((A.z >> 8u) & 255u), float((A.z >> 16u) & 255u), float(A.z >> 24u)) / 255.0;
-  // слетевшиеся на обод частицы улицы выживают только на буквах — и берут их цвет
-  float inkM = max(max(pageCol.r, pageCol.g), pageCol.b);
-  col.rgb = mix(col.rgb, pageCol / max(inkM, 0.05), morph);
-  col.a = mix(col.a, max(col.a, 0.9) * smoothstep(0.12, 0.45, inkM), morph);
+  // абстрактные частицы финала почти без цвета города
+  col.rgb = mix(col.rgb, vec3(dot(col.rgb, vec3(0.2126, 0.7152, 0.0722)) * 1.15), dis * 0.7);
   // вдали (pf) частицы подсвечены, чтобы читались как «звёзды»; летящие на место — лишь чуть ярче
   float alpha = mix(col.a, max(col.a, u_part.w), pf);
   alpha = mix(alpha, min(1.0, alpha * 2.0), 1.0 - em);
   float tw = 1.0 - u_seam.w * pfE * (0.5 + 0.5 * sin(time * (0.8 + 1.7 * rnd) + rnd2 * 6.2831));
-  // ещё не «написанное» — тусклая пыль; панель, сквозь которую проходишь, гаснет, а не слепит облаком
-  if (isPage) alpha *= mix(0.45, 1.0, em) * smoothstep(3.0, 10.0, ad);
+  // рассыпанные частицы, оказавшиеся у самого глаза, не раздуваются в мутные пятна
+  alpha *= mix(1.0, smoothstep(1.0, 5.0, z), dis);
   alpha *= fade * axle * tw * u_ring2.w;
   if (alpha < 1.0 / 255.0) return;
 
@@ -209,13 +170,6 @@ void main() {
       1.0 - 2.0 * (qy * qy + qz * qz), 2.0 * (qx * qy + qw * qz), 2.0 * (qx * qz - qw * qy),
       2.0 * (qx * qy - qw * qz), 1.0 - 2.0 * (qx * qx + qz * qz), 2.0 * (qy * qz + qw * qx),
       2.0 * (qx * qz + qw * qy), 2.0 * (qy * qz - qw * qx), 1.0 - 2.0 * (qx * qx + qy * qy));
-    if (isPage) {
-      // у элементов финала A.w = порядок(16) | yaw(8) | tilt(8): плоскость = Ry(yaw)·Rz(tilt)
-      float yaw = (float((A.w >> 16u) & 255u) / 255.0 * 2.0 - 1.0) * 3.14159265;
-      float tilt = (float(A.w >> 24u) / 255.0 * 2.0 - 1.0) * 1.57079633;
-      float cy = cos(yaw), sy = sin(yaw), ct = cos(tilt), st = sin(tilt);
-      R = mat3(cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy) * mat3(ct, st, 0.0, -st, ct, 0.0, 0.0, 0.0, 1.0);
-    }
     mat3 M = R * mat3(sc.x, 0.0, 0.0, 0.0, sc.y, 0.0, 0.0, 0.0, sc.z);
     mat3 Jb = mat3(kh * cs, kh * sn, 0.0, -sn, cs, 0.0, 0.0, 0.0, 1.0); // якобиан изгиба
     mat3 T = mat3(u_view) * Jb * M;
